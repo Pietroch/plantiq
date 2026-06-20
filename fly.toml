@@ -9,8 +9,8 @@ primary_region = "cdg"
 [processes]
   app = "python -m plantiq.run"
 
-# Schedule configured via CLI after first deploy:
-# fly machine update <machine-id> --schedule daily
+[schedule]
+  cron = "0 7 * * *"
 
 [[vm]]
   size = "shared-cpu-1x"

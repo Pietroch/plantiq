@@ -2,21 +2,21 @@
 
 # plantiq
 
-Cron job quotidien — lit les plantes depuis Supabase, récupère la météo via OpenWeatherMap, envoie une notification Bark.
+Daily cron job that reads houseplants from Supabase, fetches local weather via OpenWeatherMap, and sends a push notification via ntfy.
 
-## Démarrage
+## Getting started
 
 ```bash
-cp .env.example .env   # remplir les valeurs
+cp .env.example .env   # fill in the three secrets
 make build
-make run               # test manuel
+make run               # manual test
 ```
 
-## Déploiement (Fly.io)
+## Deployment (Fly.io)
 
 ```bash
-fly launch --no-deploy   # première fois seulement
-fly secrets set DATABASE_URL=... OPENWEATHERMAP_API_KEY=... BARK_TOKEN=...
+fly launch --no-deploy
+fly secrets set DATABASE_URL=... OPENWEATHERMAP_API_KEY=... NTFY_TOPIC=...
 make deploy
 fly machine update <machine-id> --schedule daily
 ```

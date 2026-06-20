@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 
 def test_engine_connects_and_executes_query():
-    import plantiq.core.database  # must be imported before patch resolves the attribute
+    import plantiq.core.database  # noqa: F401 — side-effect import, required for patch to resolve the attribute
 
     mock_rows = [("Monstera", "Paris", 48.8566, 2.3522)]
     mock_conn = MagicMock()

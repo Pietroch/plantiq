@@ -11,7 +11,7 @@ def test_send_posts_to_ntfy():
 
     mock_post.assert_called_once_with(
         "https://ntfy.sh/plantiq",
-        content="Paris : 22°C, clear sky".encode("utf-8"),
+        content="Paris : 22°C, clear sky".encode(),
         headers={
             "Title": "Plantiq - Monstera",
             "Content-Type": "text/plain; charset=utf-8",
