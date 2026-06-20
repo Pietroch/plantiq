@@ -1,0 +1,38 @@
+# .github/workflows/ci.yml
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install package
+        working-directory: ./scheduler
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: ./scheduler
+        run: ruff check .
+
+      - name: Test
+        working-directory: ./scheduler
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:placeholder@db.placeholder.supabase.co:5432/postgres
+          OPENWEATHERMAP_API_KEY: placeholder
+          NTFY_TOPIC: plantiq
+        run: pytest

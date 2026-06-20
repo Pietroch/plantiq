@@ -1,0 +1,17 @@
+# fly.toml
+
+app = "plantiq"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "scheduler/Dockerfile"
+
+[processes]
+  app = "python -m plantiq.run"
+
+# Schedule configured via CLI after first deploy:
+# fly machine update <machine-id> --schedule daily
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

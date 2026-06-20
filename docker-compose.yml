@@ -1,0 +1,22 @@
+# docker-compose.yml
+
+name: plantiq
+
+services:
+
+  scheduler:
+    build: ./scheduler
+    container_name: plantiq_scheduler
+    restart: "no"
+    volumes:
+      - ./scheduler/src:/app/src
+      - ./scheduler/tests:/app/tests
+    env_file:
+      - .env
+    networks:
+      - plantiq_network
+
+networks:
+  plantiq_network:
+    name: plantiq_network
+    driver: bridge
