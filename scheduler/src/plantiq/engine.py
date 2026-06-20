@@ -274,24 +274,35 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
 
     # Weather modifiers
     if weather:
-        if temp_max > 35:            freq -= 5
-        elif temp_max > 30:          freq -= 3
-        if temp_max < 10:            freq += 3
+        if temp_max > 35:
+            freq -= 5
+        elif temp_max > 30:
+            freq -= 3
+        if temp_max < 10:
+            freq += 3
         if not is_indoor:
-            if humidity > 80:        freq += 2
-            if condition == "rainy":  freq += 2
-            if condition == "stormy": freq += 3
+            if humidity > 80:
+                freq += 2
+            if condition == "rainy":
+                freq += 2
+            if condition == "stormy":
+                freq += 3
 
     # Environment modifiers
     if pl:
-        if pl.get("shade"):        freq += 3
-        if pl.get("near_ac"):      freq -= 1
-        if pl.get("near_heating"): freq -= 1
+        if pl.get("shade"):
+            freq += 3
+        if pl.get("near_ac"):
+            freq -= 1
+        if pl.get("near_heating"):
+            freq -= 1
 
     # Pot modifiers
     if container:
-        if container.get("pot_type") in ("terracotta", "fabric"): freq -= 2
-        if not container.get("has_drainage", True):               freq += 2
+        if container.get("pot_type") in ("terracotta", "fabric"):
+            freq -= 2
+        if not container.get("has_drainage", True):
+            freq += 2
 
     # Cachepot modifiers
     cachepot = next((a for a in accessories if a.get("type") == "cachepot"), None)
@@ -304,9 +315,12 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
     if health:
         issue  = health.get("issue_type")
         status = health.get("status")
-        if issue  == "overwatering":   freq += 5
-        elif issue == "underwatering": freq -= 3
-        if status == "dormant":        freq = freq * 2
+        if issue == "overwatering":
+            freq += 5
+        elif issue == "underwatering":
+            freq -= 3
+        if status == "dormant":
+            freq = freq * 2
 
     freq = max(1, int(freq))
 
@@ -342,7 +356,7 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
     if pl and pl.get("shade"):
         lines.append("Plante ombragée - vérifier le substrat avant d'arroser.")
 
-    body = "\n".join(l for l in lines if l)
+    body = "\n".join(line for line in lines if line)
     _notify(conn, plant, "watering", f"Arrosage - {plant['name']}", body, "schedule")
 
 
