@@ -147,7 +147,9 @@ def _notify(conn, plant: dict, notif_type: str, title: str, body: str, triggered
 
 # ── Rules ─────────────────────────────────────────────────────────────────────
 
-def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs, today, tz):
+def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs, snoozes, today, tz):
+    if "warning" in snoozes:
+        return
     if health and health.get("status") == "dying":
         return
     if not weather:
@@ -162,12 +164,16 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
     near_ac    = pl.get("near_ac", False) if pl else False
     light_type = pl.get("light_type") if pl else None
     distance   = pl.get("distance_to_window") if pl else None
-    temp_max_c = profile.get("temp_max_c") if profile else None
-    temp_min_c = profile.get("temp_min_c") if profile else None
+    temp_max_c  = profile.get("temp_max_c") if profile else None
+    temp_min_c  = profile.get("temp_min_c") if profile else None
+    issue_type  = health.get("issue_type") if health else None
 
     lines = []
     if temp_max_c and temp_max > temp_max_c:
-        lines.append(f"{temp_max:.0f}°C dépasse {temp_max_c:.0f}°C. Arrosage prioritaire.")
+        if issue_type == "overwatering":
+            lines.append(f"{temp_max:.1f}°C dépasse le seuil de {temp_max_c:.0f}°C. Ne pas arroser - surveiller l'humidité du substrat.")
+        else:
+            lines.append(f"{temp_max:.1f}°C dépasse le seuil de {temp_max_c:.0f}°C. Arrosage prioritaire.")
     if temp_min_c and temp_min < temp_min_c:
         lines.append(f"{temp_min:.0f}°C sous {temp_min_c:.0f}°C. Protéger la plante.")
     if temp_max > 35 and is_indoor and not near_ac:
@@ -183,7 +189,9 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
     _notify(conn, plant, "warning", f"Alerte - {plant['name']}", "\n".join(lines), "weather")
 
 
-def _rule_health_check(conn, plant, health, last_notifs, today, tz):
+def _rule_health_check(conn, plant, health, last_notifs, snoozes, today, tz):
+    if "health_check" in snoozes:
+        return
     if not health or health.get("status") in ("healthy", None):
         return
 
@@ -204,9 +212,12 @@ def _rule_health_check(conn, plant, health, last_notifs, today, tz):
     _notify(conn, plant, "health_check", f"Sante - {plant['name']}", "\n".join(lines), "health_status")
 
 
-def _rule_repotting(conn, plant, profile, container, health, last_notifs, today, tz):
-    if health and health.get("status") == "dying":
+def _rule_repotting(conn, plant, profile, container, health, last_notifs, snoozes, today, tz):
+    if "repotting" in snoozes:
         return
+    if health and health.get("status") == "dying":
+        if not (container and container.get("repotting_urgent")):
+            return
     if _recently_notified(last_notifs.get("repotting"), 30, today, tz):
         return
 
@@ -255,9 +266,13 @@ def _rule_repotting(conn, plant, profile, container, health, last_notifs, today,
     _notify(conn, plant, "repotting", f"Rempotage - {plant['name']}", "\n".join(lines), "schedule")
 
 
-def _rule_watering(conn, plant, profile, pl, container, accessories, health, weather, care_logs, last_notifs, today, tz):
-    if health and health.get("status") == "dying":
+def _rule_watering(conn, plant, profile, pl, container, accessories, health, weather, care_logs, last_notifs, snoozes, today, tz):
+    if "watering" in snoozes:
         return
+    if health and health.get("status") in ("dying", "burned"):
+        return
+    if container and container.get("soil_condition") == "waterlogged":
+        return  # Terre saturée — pas d'arrosage
 
     freq_base = profile.get(f"watering_frequency_days_{_season(today)}")
     if not freq_base:
@@ -331,6 +346,8 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
 
     qty     = get_watering_quantity(profile, container)
     qty_eff = apply_quantity_modifiers(qty, weather, container, health)
+    if health and health.get("status") == "dormant":
+        qty_eff = max(50, round(qty_eff * 0.5 / 50) * 50)
     mode    = profile.get("watering_mode") or "soil_only"
     instructions = profile.get("watering_instructions") or ""
 
@@ -360,7 +377,9 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
     _notify(conn, plant, "watering", f"Arrosage - {plant['name']}", body, "schedule")
 
 
-def _rule_misting(conn, plant, profile, pl, container, health, weather, care_logs, last_notifs, today, tz):
+def _rule_misting(conn, plant, profile, pl, container, health, weather, care_logs, last_notifs, snoozes, today, tz):
+    if "misting" in snoozes:
+        return
     if profile.get("humidity_level") != "high":
         return
     if health and health.get("issue_type") == "overwatering":
@@ -394,12 +413,17 @@ def _rule_misting(conn, plant, profile, pl, container, health, weather, care_log
     _notify(conn, plant, "misting", f"Brumisation - {plant['name']}", "\n".join(lines), "schedule")
 
 
-def _rule_fertilizing(conn, plant, profile, container, health, care_logs, last_notifs, today, tz):
+def _rule_fertilizing(conn, plant, profile, container, health, care_logs, last_notifs, snoozes, today, tz):
+    if "fertilizing" in snoozes:
+        return
     if today.month not in SUMMER_MONTHS:
         return
-    if container and (container.get("soil_condition") == "exhausted" or has_mold(container)):
+    if container and (
+        container.get("soil_condition") in ("exhausted", "waterlogged")
+        or has_mold(container)
+    ):
         return
-    if health and health.get("status") in ("sick", "dying", "dormant"):
+    if health and health.get("status") in ("sick", "dying", "dormant", "recovering"):
         return
     if container and container.get("last_repotted"):
         if (today - container["last_repotted"]).days < 60:
@@ -421,6 +445,8 @@ def _rule_fertilizing(conn, plant, profile, container, health, care_logs, last_n
         f"Dernière fertilisation il y a {jours} jours.",
         f"Fréquence recommandée : tous les {freq} jours (mars-septembre).",
     ]
+    if container and container.get("soil_condition") == "compacted":
+        lines.append("Substrat compacté - fertiliser avec une dose réduite de moitié.")
     _notify(conn, plant, "fertilizing", f"Fertilisation - {plant['name']}", "\n".join(lines), "schedule")
 
 
@@ -501,6 +527,15 @@ def run_engine() -> None:
         """), {"ids": ids}).mappings().fetchall():
             notifs_by_plant.setdefault(str(row["plant_id"]), {})[row["type"]] = dict(row)
 
+        snoozes_by_plant: dict[str, set] = {}
+        for row in conn.execute(text("""
+            SELECT plant_id, notif_type FROM notification_snooze
+            WHERE plant_id = ANY(:ids)
+            AND done = false
+            AND (snoozed_until IS NULL OR snoozed_until >= :today)
+        """), {"ids": ids, "today": today}).mappings().fetchall():
+            snoozes_by_plant.setdefault(str(row["plant_id"]), set()).add(str(row["notif_type"]))
+
         # Evaluate rules for each plant in priority order
         for plant in plants:
             pid     = str(plant["id"])
@@ -519,13 +554,14 @@ def run_engine() -> None:
             last_notifs = notifs_by_plant.get(pid, {})
             weather     = weather_by_location.get(str(plant["location_id"]))
 
+            snoozes = snoozes_by_plant.get(pid, set())
             try:
-                _rule_weather_warning(conn, p, profile, pl, weather, health, last_notifs, today, TZ)
-                _rule_health_check(conn, p, health, last_notifs, today, TZ)
-                _rule_repotting(conn, p, profile, container, health, last_notifs, today, TZ)
-                _rule_watering(conn, p, profile, pl, container, accessories, health, weather, care_logs, last_notifs, today, TZ)
-                _rule_misting(conn, p, profile, pl, container, health, weather, care_logs, last_notifs, today, TZ)
-                _rule_fertilizing(conn, p, profile, container, health, care_logs, last_notifs, today, TZ)
+                _rule_weather_warning(conn, p, profile, pl, weather, health, last_notifs, snoozes, today, TZ)
+                _rule_health_check(conn, p, health, last_notifs, snoozes, today, TZ)
+                _rule_repotting(conn, p, profile, container, health, last_notifs, snoozes, today, TZ)
+                _rule_watering(conn, p, profile, pl, container, accessories, health, weather, care_logs, last_notifs, snoozes, today, TZ)
+                _rule_misting(conn, p, profile, pl, container, health, weather, care_logs, last_notifs, snoozes, today, TZ)
+                _rule_fertilizing(conn, p, profile, container, health, care_logs, last_notifs, snoozes, today, TZ)
                 conn.commit()
             except Exception as e:
                 log.error("Engine error for plant %s: %s", plant["name"], e)

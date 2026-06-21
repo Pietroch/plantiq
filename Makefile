@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: up down build logs sh run test lint deploy help
+.PHONY: up down build logs sh run test lint simulate log deploy help
 
 up:       ## Start the stack
 	docker compose up -d
@@ -25,6 +25,12 @@ test:     ## Run tests
 
 lint:     ## Lint code
 	docker compose run --rm scheduler ruff check .
+
+log:      ## Log une action ou snoozer une notification
+	docker compose run --rm scheduler python -m plantiq.cli
+
+simulate: ## Run notification engine simulation (no DB, no ntfy)
+	docker compose run --rm scheduler python tests/test_simulation.py
 
 deploy:   ## Deploy to Fly.io
 	fly deploy
