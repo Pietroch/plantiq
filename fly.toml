@@ -7,14 +7,15 @@ app = 'plantiq-moonlit-fog-3783'
 primary_region = 'cdg'
 
 [build]
-  dockerfile = 'scheduler/Dockerfile'
+    dockerfile = 'scheduler/Dockerfile'
+    context = 'scheduler'
 
 [processes]
-  app = 'python -m plantiq.run'
+    app = 'python -m plantiq.run'
 
 [schedule]
-  cron = '0 19 * * *'
+    cron = '0 20 * * *'
 
 [[vm]]
-  size = 'shared-cpu-1x'
-  memory = '256mb'
+    size = 'shared-cpu-1x'
+    memory = '256mb'
