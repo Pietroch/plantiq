@@ -31,7 +31,7 @@ TABLES = [
 
 class _Encoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, (datetime.datetime, datetime.date)):
+        if isinstance(obj, datetime.datetime | datetime.date):
             return obj.isoformat()
         if isinstance(obj, uuid.UUID):
             return str(obj)
@@ -50,7 +50,7 @@ def run() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     data: dict = {
-        "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "exported_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "tables": {},
     }
 
