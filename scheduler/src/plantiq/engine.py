@@ -159,11 +159,8 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
 
     temp_max   = weather.get("temperature_max") or 0
     temp_min   = weather.get("temperature_min") or 0
-    uv_index   = weather.get("uv_index") or 0
     is_indoor  = pl.get("indoor", True) if pl else True
     near_ac    = pl.get("near_ac", False) if pl else False
-    light_type = pl.get("light_type") if pl else None
-    distance   = pl.get("distance_to_window") if pl else None
     temp_max_c  = profile.get("temp_max_c") if profile else None
     temp_min_c  = profile.get("temp_min_c") if profile else None
     issue_type  = health.get("issue_type") if health else None
@@ -178,8 +175,6 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
         lines.append(f"{temp_min:.0f}°C sous {temp_min_c:.0f}°C. Protéger la plante.")
     if temp_max > 35 and is_indoor and not near_ac:
         lines.append(f"Chaleur {temp_max:.0f}°C en intérieur sans climatisation.")
-    if uv_index > 8 and light_type == "direct" and distance in ("very_close", "close"):
-        lines.append(f"Indice UV {uv_index:.0f} - risque brûlure. Éloigner de la fenêtre.")
     if temp_min < 2 and not is_indoor:
         lines.append(f"{temp_min:.0f}°C - risque de gel. Rentrer la plante.")
 
@@ -375,6 +370,12 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
 
     body = "\n".join(line for line in lines if line)
     _notify(conn, plant, "watering", f"Arrosage - {plant['name']}", body, "schedule")
+
+    # Auto-log watering — engine assumes the action will be performed
+    conn.execute(text("""
+        INSERT INTO care_logs (plant_id, action, quantity_ml, note)
+        VALUES (:plant_id, CAST(:action AS care_action), :qty_ml, :note)
+    """), {"plant_id": str(plant["id"]), "action": "watering", "qty_ml": qty_eff, "note": "auto-logged by engine"})
 
 
 def _rule_misting(conn, plant, profile, pl, container, health, weather, care_logs, last_notifs, snoozes, today, tz):

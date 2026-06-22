@@ -5,7 +5,9 @@ name: plantiq
 services:
 
   scheduler:
-    build: ./scheduler
+    build:
+      context: .
+      dockerfile: scheduler/Dockerfile
     container_name: plantiq_scheduler
     restart: "no"
     volumes:

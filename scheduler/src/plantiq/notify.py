@@ -9,7 +9,7 @@ log = get_logger(__name__)
 
 
 def send(title: str, body: str) -> None:
-    httpx.post(
+    response = httpx.post(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         content=body.encode(),
         headers={
@@ -18,4 +18,5 @@ def send(title: str, body: str) -> None:
         },
         timeout=10,
     )
+    response.raise_for_status()
     log.info("Notification sent: %s", title)

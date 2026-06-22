@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: up down build logs sh run test lint simulate log deploy help
+.PHONY: up down build logs sh run test lint simulate log backup deploy help
 
 up:       ## Start the stack
 	docker compose up -d
@@ -31,6 +31,11 @@ log:      ## Log une action ou snoozer une notification
 
 simulate: ## Run notification engine simulation (no DB, no ntfy)
 	docker compose run --rm scheduler python tests/test_simulation.py
+
+backup:   ## Export all DB tables to JSON (uses BACKUP_PATH from .env)
+	$(eval DEST := $(or $(shell grep -E '^BACKUP_PATH=' .env 2>/dev/null | cut -d= -f2- | tr -d '\r'),$(CURDIR)))
+	@mkdir -p "$(DEST)"
+	docker compose run --rm -v "$(DEST):$(DEST)" -e BACKUP_PATH="$(DEST)" scheduler python -m plantiq.backup
 
 deploy:   ## Deploy to Fly.io
 	fly deploy
