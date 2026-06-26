@@ -44,13 +44,13 @@ def has_mold(container: dict | None) -> bool:
 def get_watering_quantity(profile: dict, container: dict | None) -> int:
     if profile.get("watering_quantity_ml"):
         return profile["watering_quantity_ml"]
-    pot_size_cm = container.get("pot_size_cm") if container else None
-    if not pot_size_cm:
-        return 200
-    radius = pot_size_cm / 2
-    volume_base_ml = math.pi * (radius ** 2) * 0.3
-    multipliers = {"light": 0.5, "moderate": 1.0, "heavy": 1.5}
-    qty = volume_base_ml * multipliers.get(profile.get("watering_amount", "moderate"), 1.0)
+    diameter = container.get("pot_diameter_cm") if container else None
+    height   = container.get("pot_height_cm") if container else None
+    if not diameter or not height:
+        return 300
+    volume_ml = math.pi * (diameter / 2) ** 2 * height
+    coefficients = {"light": 0.025, "moderate": 0.04, "heavy": 0.06}
+    qty = volume_ml * coefficients.get(profile.get("watering_amount", "moderate"), 0.04)
     return max(100, round(qty / 50) * 50)
 
 

@@ -32,7 +32,7 @@ plantiq est un cron job Python personnel qui surveille des plantes d'intérieur 
 
 **Ce qu'il produit :** Des notifications push envoyées sur le topic ntfy `plantiq`, des lignes dans `weather_logs` et `notifications_log` dans Supabase, et des entrées dans `care_logs` et `notification_snooze` via CLI. En option : un export JSON de toute la base via `make backup`.
 
-**Comment il tourne :** Conteneur Docker one-shot, sans port HTTP exposé, déployé sur Fly.io avec `cron = "0 18 * * *"` (18h UTC quotidien). En local : `make run` lance un conteneur éphémère.
+**Comment il tourne :** Conteneur Docker one-shot, sans port HTTP exposé. Scheduling : GitHub Actions (`daily-run.yml`, `cron: "0 18 * * *"`, 18h UTC quotidien). En local : `make run` lance un conteneur éphémère.
 
 **Changements depuis V1 :** Ajout du module `backup.py` (export JSON de toutes les tables), commande `make backup` et variable `BACKUP_PATH` dans `.env`. Heure d'exécution Fly.io corrigée : 18h UTC (non 7h). Ajout des commandes `make up` et `make down`.
 
@@ -46,7 +46,8 @@ plantiq/
 │   └── devcontainer.json              ← ouvre VSCode dans le conteneur scheduler
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                     ← lint ruff + pytest sur push/PR
+│       ├── ci.yml                     ← lint ruff + pytest sur push/PR
+│       └── daily-run.yml              ← run quotidien 18h UTC (schedule cron GitHub Actions)
 ├── scheduler/                         ← service unique, cron job Python
 │   ├── Dockerfile                     ← image python:3.13-slim avec libpq-dev
 │   ├── pyproject.toml                 ← dépendances + config pytest et ruff
@@ -82,7 +83,7 @@ plantiq/
 ├── .env.example                       ← template des variables d'env
 ├── .gitignore                         ← exclut .env, caches, simulation_report.md
 ├── docker-compose.yml                 ← service scheduler + réseau bridge
-├── fly.toml                           ← config déploiement Fly.io + cron schedule
+├── fly.toml                           ← config déploiement Fly.io (make deploy uniquement, schedule retiré)
 ├── Makefile                           ← raccourcis de toutes les commandes
 └── README.md                          ← installation rapide + déploiement Fly.io
 ```
@@ -152,7 +153,7 @@ Description en une phrase, `Getting started` (3 commandes : `cp .env.example .en
 
 ### `fly.toml`
 
-Application Fly.io : `plantiq-moonlit-fog-3783`, région `cdg` (Paris). Pointe sur `scheduler/Dockerfile`. Le process `app` exécute `python -m plantiq.run`. `[schedule] cron = "0 18 * * *"` déclenche l'exécution quotidienne à **18h UTC**. VM : `shared-cpu-1x`, 256 MB RAM. Aucun port exposé (`[[services]]` absent).
+Application Fly.io : `plantiq-moonlit-fog-3783`, région `cdg` (Paris). Pointe sur `scheduler/Dockerfile`. Le process `app` exécute `python -m plantiq.run`. VM : `shared-cpu-1x`, 256 MB RAM. Aucun port exposé (`[[services]]` absent). Le scheduling n'est pas géré par Fly.io — le déclencheur quotidien est le workflow GitHub Actions `daily-run.yml` (`cron: "0 18 * * *"`, 18h UTC). Ce fichier est conservé pour `make deploy` depuis le poste local.
 
 ---
 
@@ -190,7 +191,7 @@ Image construite localement depuis `scheduler/Dockerfile` avec le contexte racin
 | `RUN mkdir -p src && pip install -e ".[dev]"` | Installe les dépendances avant le code source. `mkdir src` satisfait l'installation editable avant que le vrai code soit copié. |
 | `COPY scheduler/src/ ./src/` | Copie le code source de production |
 | `COPY scheduler/tests/ ./tests/` | Copie les tests (nécessaire pour `make test` et `make simulate`) |
-| Pas de `CMD` | La commande est définie par usage (`make run`, `make test`, `make sh`…), pas dans l'image |
+| `CMD ["python", "-m", "plantiq.run"]` | Point d'entrée par défaut. Écrasé par `docker compose run --rm scheduler <cmd>` pour `make test`, `make lint`, `make sh`. |
 
 Note : Le contexte build est `.` (racine), donc les paths `COPY` préfixent `scheduler/`. Si le contexte était `./scheduler`, les paths seraient relatifs à ce dossier.
 

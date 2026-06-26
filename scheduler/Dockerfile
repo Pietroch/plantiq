@@ -15,4 +15,4 @@ RUN mkdir -p src && pip install --no-cache-dir -e ".[dev]"
 COPY scheduler/src/ ./src/
 COPY scheduler/tests/ ./tests/
 
-# No CMD — defined per usage (make run, make test, devcontainer)
+CMD ["python", "-m", "plantiq.run"]

@@ -20,6 +20,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: "pip"
+          cache-dependency-path: "scheduler/pyproject.toml"
 
       - name: Install package
         working-directory: ./scheduler

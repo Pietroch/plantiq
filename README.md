@@ -18,5 +18,14 @@ make run               # manual test
 fly launch --no-deploy
 fly secrets set DATABASE_URL=... OPENWEATHERMAP_API_KEY=... NTFY_TOPIC=...
 make deploy
-fly machine update <machine-id> --schedule daily
 ```
+
+## Scheduling (GitHub Actions)
+
+Create three secrets in **Settings → Secrets and variables → Actions**:
+
+- `DATABASE_URL`
+- `OPENWEATHERMAP_API_KEY`
+- `NTFY_TOPIC`
+
+The `daily-run.yml` workflow runs automatically at 18:00 UTC. To test manually: **Actions → Daily run → Run workflow**.
