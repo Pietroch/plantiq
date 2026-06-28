@@ -1,6 +1,6 @@
 # Makefile
 
-.PHONY: up down build logs sh run test lint simulate log backup deploy help
+.PHONY: up down build logs sh run test lint simulate log backup help
 
 up:       ## Start the stack
 	docker compose up -d
@@ -36,9 +36,6 @@ backup:   ## Export all DB tables to JSON (uses BACKUP_PATH from .env)
 	$(eval DEST := $(or $(shell grep -E '^BACKUP_PATH=' .env 2>/dev/null | cut -d= -f2- | tr -d '\r'),$(CURDIR)))
 	@mkdir -p "$(DEST)"
 	docker compose run --rm -v "$(DEST):$(DEST)" -e BACKUP_PATH="$(DEST)" scheduler python -m plantiq.backup
-
-deploy:   ## Deploy to Fly.io
-	fly deploy
 
 help:     ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'

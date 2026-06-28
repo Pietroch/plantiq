@@ -15,14 +15,8 @@ log = get_logger(__name__)
 TZ = ZoneInfo("Europe/Brussels")
 SUMMER_MONTHS = range(4, 10)  # April–September inclusive
 
-_OWM_CONDITION = {
-    "Clear":        "sunny",
-    "Clouds":       "cloudy",
-    "Rain":         "rainy",
-    "Drizzle":      "rainy",
-    "Thunderstorm": "stormy",
-    "Snow":         "snowy",
-}
+# Fraction of pot volume to deliver per watering, by water need level
+_WATERING_COEFFICIENTS = {"light": 0.025, "moderate": 0.04, "heavy": 0.06}
 
 _WATERING_MODE_LABELS = {
     "soil_only": "sur la terre uniquement",
@@ -49,8 +43,7 @@ def get_watering_quantity(profile: dict, container: dict | None) -> int:
     if not diameter or not height:
         return 300
     volume_ml = math.pi * (diameter / 2) ** 2 * height
-    coefficients = {"light": 0.025, "moderate": 0.04, "heavy": 0.06}
-    qty = volume_ml * coefficients.get(profile.get("watering_amount", "moderate"), 0.04)
+    qty = volume_ml * _WATERING_COEFFICIENTS.get(profile.get("watering_amount", "moderate"), 0.04)
     return max(100, round(qty / 50) * 50)
 
 
@@ -91,33 +84,22 @@ def _season(today: date) -> str:
 
 def _store_weather(conn, location_id: str, lat: float, lon: float, today: date) -> dict | None:
     try:
-        raw = get_weather(lat, lon)
-    except Exception as e:
-        log.error("OWM failed for location %s: %s", location_id, e)
+        w = get_weather(lat, lon)
+    except Exception:
+        log.exception("OWM failed for location %s", location_id)
         return None
-
-    owm_main = (raw.get("weather") or [{}])[0].get("main", "")
-    w = {
-        "temperature_min": raw["main"].get("temp_min"),
-        "temperature_max": raw["main"].get("temp_max"),
-        "humidity":        raw["main"].get("humidity"),
-        "condition":       _OWM_CONDITION.get(owm_main, "cloudy"),
-        "uv_index":        raw.get("uvi"),
-        "wind_speed":      (raw.get("wind") or {}).get("speed"),
-    }
 
     conn.execute(text("""
         INSERT INTO weather_logs
                (location_id, date, temperature_min, temperature_max,
-                humidity, condition, uv_index, wind_speed)
+                humidity, condition, wind_speed)
         VALUES (:loc_id, :date, :temp_min, :temp_max,
-                :humidity, CAST(:condition AS weather_condition), :uv_index, :wind_speed)
+                :humidity, CAST(:condition AS weather_condition), :wind_speed)
         ON CONFLICT (location_id, date) DO UPDATE SET
             temperature_min = EXCLUDED.temperature_min,
             temperature_max = EXCLUDED.temperature_max,
             humidity        = EXCLUDED.humidity,
             condition       = EXCLUDED.condition,
-            uv_index        = EXCLUDED.uv_index,
             wind_speed      = EXCLUDED.wind_speed,
             fetched_at      = NOW()
     """), {
@@ -127,7 +109,6 @@ def _store_weather(conn, location_id: str, lat: float, lon: float, today: date) 
         "temp_max": w["temperature_max"],
         "humidity": w["humidity"],
         "condition": w["condition"],
-        "uv_index":  w["uv_index"],
         "wind_speed": w["wind_speed"],
     })
     return w
@@ -141,8 +122,8 @@ def _log_notification(conn, plant_id: str, notif_type: str, message: str, trigge
 
 
 def _notify(conn, plant: dict, notif_type: str, title: str, body: str, triggered_by: str) -> None:
-    send(title, body)
     _log_notification(conn, str(plant["id"]), notif_type, body, triggered_by)
+    send(title, body)
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────────
@@ -175,8 +156,6 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
         lines.append(f"{temp_min:.0f}°C sous {temp_min_c:.0f}°C. Protéger la plante.")
     if temp_max > 35 and is_indoor and not near_ac:
         lines.append(f"Chaleur {temp_max:.0f}°C en intérieur sans climatisation.")
-    if temp_min < 2 and not is_indoor:
-        lines.append(f"{temp_min:.0f}°C - risque de gel. Rentrer la plante.")
 
     if not lines:
         return
@@ -199,7 +178,7 @@ def _rule_health_check(conn, plant, health, last_notifs, snoozes, today, tz):
     lines = [
         f"Statut : {status}.",
         f"Problème : {health.get('issue_type', 'none')}.",
-        f"Traitement : {health.get('treatment') or 'aucun'}.",
+        f"Traitement : {health.get('treating ') or 'aucun'}.",
     ]
     if status == "dying":
         lines.append("ALERTE - état critique. Intervention immédiate requise.")
@@ -556,14 +535,18 @@ def run_engine() -> None:
             weather     = weather_by_location.get(str(plant["location_id"]))
 
             snoozes = snoozes_by_plant.get(pid, set())
-            try:
-                _rule_weather_warning(conn, p, profile, pl, weather, health, last_notifs, snoozes, today, TZ)
-                _rule_health_check(conn, p, health, last_notifs, snoozes, today, TZ)
-                _rule_repotting(conn, p, profile, container, health, last_notifs, snoozes, today, TZ)
-                _rule_watering(conn, p, profile, pl, container, accessories, health, weather, care_logs, last_notifs, snoozes, today, TZ)
-                _rule_misting(conn, p, profile, pl, container, health, weather, care_logs, last_notifs, snoozes, today, TZ)
-                _rule_fertilizing(conn, p, profile, container, health, care_logs, last_notifs, snoozes, today, TZ)
-                conn.commit()
-            except Exception as e:
-                log.error("Engine error for plant %s: %s", plant["name"], e)
-                conn.rollback()
+            # Each rule commits independently — a failure in one rule does not roll back a prior notification
+            for rule in [
+                lambda: _rule_weather_warning(conn, p, profile, pl, weather, health, last_notifs, snoozes, today, TZ),
+                lambda: _rule_health_check(conn, p, health, last_notifs, snoozes, today, TZ),
+                lambda: _rule_repotting(conn, p, profile, container, health, last_notifs, snoozes, today, TZ),
+                lambda: _rule_watering(conn, p, profile, pl, container, accessories, health, weather, care_logs, last_notifs, snoozes, today, TZ),
+                lambda: _rule_misting(conn, p, profile, pl, container, health, weather, care_logs, last_notifs, snoozes, today, TZ),
+                lambda: _rule_fertilizing(conn, p, profile, container, health, care_logs, last_notifs, snoozes, today, TZ),
+            ]:
+                try:
+                    rule()
+                    conn.commit()
+                except Exception as e:
+                    log.error("Engine error for plant %s: %s", plant["name"], e)
+                    conn.rollback()

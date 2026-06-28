@@ -6,8 +6,15 @@ from sqlalchemy import text
 
 from plantiq.core.database import engine as db_engine
 
-CARE_ACTIONS = ["watering", "fertilizing", "misting", "repotting", "pruning", "treatment"]
-NOTIF_TYPES  = ["warning", "health_check", "repotting", "watering", "misting", "fertilizing"]
+
+def _load_enum(conn, typename: str) -> list[str]:
+    rows = conn.execute(text("""
+        SELECT enumlabel::text FROM pg_enum
+        JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+        WHERE pg_type.typname = :typename
+        ORDER BY enumsortorder
+    """), {"typename": typename}).fetchall()
+    return [r[0] for r in rows]
 
 
 def _pick(prompt: str, options: list[str]) -> str:
@@ -26,10 +33,10 @@ def _load_plants(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _log_action(conn, plants: list[dict]) -> None:
+def _log_action(conn, plants: list[dict], care_actions: list[str]) -> None:
     plant    = _pick("Plante :", [p["name"] for p in plants])
     plant_id = next(p["id"] for p in plants if p["name"] == plant)
-    action   = _pick("Action :", CARE_ACTIONS)
+    action   = _pick("Action :", care_actions)
 
     qty_raw = input("Quantité ml (vide = aucune) : ").strip()
     qty_ml  = int(qty_raw) if qty_raw.isdigit() else None
@@ -43,10 +50,10 @@ def _log_action(conn, plants: list[dict]) -> None:
     print(f"Action '{action}' enregistrée pour {plant}.")
 
 
-def _snooze(conn, plants: list[dict]) -> None:
+def _snooze(conn, plants: list[dict], notif_types: list[str]) -> None:
     plant      = _pick("Plante :", [p["name"] for p in plants])
     plant_id   = next(p["id"] for p in plants if p["name"] == plant)
-    notif_type = _pick("Type de notification :", NOTIF_TYPES)
+    notif_type = _pick("Type de notification :", notif_types)
 
     date_raw = input("Snooze jusqu'au (JJ/MM/AAAA, vide = indéfini) : ").strip()
     until = None
@@ -71,7 +78,10 @@ def _snooze(conn, plants: list[dict]) -> None:
 
 def run() -> None:
     with db_engine.connect() as conn:
-        plants = _load_plants(conn)
+        plants       = _load_plants(conn)
+        care_actions = _load_enum(conn, "care_action")
+        notif_types  = _load_enum(conn, "notif_type")
+
         if not plants:
             print("Aucune plante trouvée dans la base.")
             return
@@ -80,9 +90,9 @@ def run() -> None:
             print("\n1) Logger une action\n2) Snoozer une notification\n3) Quitter")
             choice = input("Choix : ").strip()
             if choice == "1":
-                _log_action(conn, plants)
+                _log_action(conn, plants, care_actions)
             elif choice == "2":
-                _snooze(conn, plants)
+                _snooze(conn, plants, notif_types)
             elif choice == "3":
                 break
             else:

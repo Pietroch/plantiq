@@ -148,14 +148,14 @@ DISTANCES   = ["very_close", "close", "medium", "far"]
 def random_context(plant_id: str, today: date) -> dict:
     status     = random.choice(STATUSES)
     issue_type = "none" if status == "healthy" else random.choice([i for i in ISSUE_TYPES if i != "none"])
-    pot_type   = random.choice(POT_TYPES)
-    pot_size   = random.choice([12, 15, 17, 20, 24, 28, 32])
+    pot_type     = random.choice(POT_TYPES)
+    pot_diameter = random.choice([12, 15, 17, 20, 24, 28, 32])
+    pot_height   = random.choice([10, 12, 15, 18, 20, 25, 30])
     last_water = today - timedelta(days=random.randint(0, 30))
     last_repot = today - timedelta(days=random.randint(30, 730))
     temp_max   = round(random.uniform(5, 40), 1)
     temp_min   = round(temp_max - random.uniform(5, 15), 1)
     humidity   = random.randint(20, 95)
-    uv_index   = round(random.uniform(0, 12), 1)
     condition  = random.choice(CONDITIONS)
     is_indoor  = random.choice([True, True, True, False])
     has_drain  = random.choice([True, True, False])
@@ -168,8 +168,6 @@ def random_context(plant_id: str, today: date) -> dict:
     if condition == "snowy":
         temp_max = min(temp_max, 2.9)
         temp_min = min(temp_min, temp_max - 1)
-    if condition == "stormy":
-        uv_index = min(uv_index, 2.9)
     if is_indoor:
         temp_min = max(temp_min, 5.1)
 
@@ -184,7 +182,8 @@ def random_context(plant_id: str, today: date) -> dict:
         },
         "container": {
             "pot_type": pot_type,
-            "pot_size_cm": pot_size,
+            "pot_diameter_cm": pot_diameter,
+            "pot_height_cm": pot_height,
             "has_drainage": has_drain,
             "soil_condition": random.choice(SOIL_CONDS),
             "soil_issues": random.choice([None, None, "mold, calcium_deposits", None]),
@@ -195,7 +194,7 @@ def random_context(plant_id: str, today: date) -> dict:
         "health": {
             "status": status,
             "issue_type": issue_type,
-            "treatment": "En cours de traitement." if status in ("sick", "recovering") else None,
+            "treating ": "En cours de traitement." if status in ("sick", "recovering") else None,
             "resolved_at": None,
         },
         "care_logs": {
@@ -208,7 +207,6 @@ def random_context(plant_id: str, today: date) -> dict:
             "temperature_min": temp_min,
             "humidity": humidity,
             "condition": condition,
-            "uv_index": uv_index,
             "wind_speed": round(random.uniform(0, 50), 1),
         },
         "accessories": [
@@ -256,7 +254,7 @@ def generate_report(results: list[dict], output_path: str, seed: int) -> None:
             f"| Shade | `{pl['shade']}` |",
             f"| Near AC | `{pl['near_ac']}` |",
             f"| Near heating | `{pl['near_heating']}` |",
-            f"| Pot | `{c['pot_type']}` {c['pot_size_cm']}cm — drainage: `{c['has_drainage']}` |",
+            f"| Pot | `{c['pot_type']}` ⌀{c['pot_diameter_cm']}cm × h{c['pot_height_cm']}cm — drainage: `{c['has_drainage']}` |",
             f"| Soil condition | `{c['soil_condition']}` |",
             f"| Soil issues | `{c['soil_issues'] or 'none'}` |",
             f"| Last watered | `{ctx['care_logs']['watering']['done_at']}` |",
@@ -265,7 +263,6 @@ def generate_report(results: list[dict], output_path: str, seed: int) -> None:
             f"| Temp min/max | `{w['temperature_min']}°C / {w['temperature_max']}°C` |",
             f"| Humidity | `{w['humidity']}%` |",
             f"| Condition | `{w['condition']}` |",
-            f"| UV index | `{w['uv_index']}` |",
             "",
             "### Notifications generated",
             "",
