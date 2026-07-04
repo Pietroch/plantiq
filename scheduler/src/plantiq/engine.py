@@ -26,7 +26,7 @@ _WATERING_MODE_LABELS = {
 }
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# --- helpers
 
 def has_mold(container: dict | None) -> bool:
     if not container:
@@ -80,7 +80,7 @@ def _season(today: date) -> str:
     return "summer" if today.month in SUMMER_MONTHS else "winter"
 
 
-# ── Persistence helpers ───────────────────────────────────────────────────────
+# --- persistence helpers
 
 def _store_weather(conn, location_id: str, lat: float, lon: float, today: date) -> dict | None:
     try:
@@ -126,7 +126,7 @@ def _notify(conn, plant: dict, notif_type: str, title: str, body: str, triggered
     send(title, body)
 
 
-# ── Rules ─────────────────────────────────────────────────────────────────────
+# --- rules
 
 def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs, snoozes, today, tz):
     if "warning" in snoozes:
@@ -350,7 +350,6 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
     body = "\n".join(line for line in lines if line)
     _notify(conn, plant, "watering", f"Arrosage - {plant['name']}", body, "schedule")
 
-    # Auto-log watering — engine assumes the action will be performed
     conn.execute(text("""
         INSERT INTO care_logs (plant_id, action, quantity_ml, note)
         VALUES (:plant_id, CAST(:action AS care_action), :qty_ml, :note)
@@ -430,7 +429,7 @@ def _rule_fertilizing(conn, plant, profile, container, health, care_logs, last_n
     _notify(conn, plant, "fertilizing", f"Fertilisation - {plant['name']}", "\n".join(lines), "schedule")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# --- main
 
 def run_engine() -> None:
     today = datetime.now(TZ).date()

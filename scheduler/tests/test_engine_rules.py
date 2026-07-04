@@ -19,7 +19,7 @@ TODAY_WINTER = date(2026, 1, 15)  # hors SUMMER_MONTHS
 PLANT = {"id": "p1", "name": "Monstera", "city": "Bruxelles", "location_id": "loc1"}
 
 
-# ── Builders ──────────────────────────────────────────────────────────────────
+# --- builders
 
 def _conn():
     return MagicMock()
@@ -80,7 +80,7 @@ def _notified(days_ago: int) -> dict:
     return {"sent_at": datetime.now(TZ) - timedelta(days=days_ago)}
 
 
-# ── _rule_watering ────────────────────────────────────────────────────────────
+# --- _rule_watering
 
 def test_watering_fires_when_overdue():
     with patch("plantiq.engine.send") as mock_send:
@@ -92,7 +92,6 @@ def test_watering_fires_when_overdue():
 
 
 def test_watering_autologs_care_when_fires():
-    """Quand la règle déclenche, conn.execute est appelé 2 fois : _log_notification + auto-log."""
     c = _conn()
     with patch("plantiq.engine.send"):
         _rule_watering(
@@ -159,7 +158,7 @@ def test_watering_skips_when_recently_notified():
 
 
 def test_watering_dormant_doubles_frequency():
-    """freq_base=7, dormant ×2=14 — 10 jours ne suffit pas."""
+    # freq_base=7, dormant ×2=14 — 10 jours ne suffit pas
     with patch("plantiq.engine.send") as mock_send:
         _rule_watering(
             _conn(), PLANT, _profile(), _pl(), _container(), [],
@@ -169,7 +168,7 @@ def test_watering_dormant_doubles_frequency():
     mock_send.assert_not_called()
 
 
-# ── _rule_misting ─────────────────────────────────────────────────────────────
+# --- _rule_misting
 
 def test_misting_fires_when_near_ac_and_high_humidity_level():
     with patch("plantiq.engine.send") as mock_send:
@@ -202,7 +201,7 @@ def test_misting_skips_when_humidity_level_not_high():
 
 
 def test_misting_skips_when_weather_none():
-    """Sans météo, humidity prend 100 par défaut — la règle ne doit pas déclencher."""
+    # sans météo, humidity vaut 100 par défaut → condition non atteinte
     with patch("plantiq.engine.send") as mock_send:
         _rule_misting(
             _conn(), PLANT, _profile(humidity_level="high"), _pl(),
@@ -242,7 +241,7 @@ def test_misting_skips_when_snoozed():
     mock_send.assert_not_called()
 
 
-# ── _rule_weather_warning ─────────────────────────────────────────────────────
+# --- _rule_weather_warning
 
 def test_weather_warning_fires_when_temp_exceeds_profile_max():
     with patch("plantiq.engine.send") as mock_send:
@@ -308,7 +307,7 @@ def test_weather_warning_skips_when_no_conditions_met():
     mock_send.assert_not_called()
 
 
-# ── _rule_health_check ────────────────────────────────────────────────────────
+# --- _rule_health_check
 
 def test_health_check_fires_when_sick():
     with patch("plantiq.engine.send") as mock_send:
@@ -347,7 +346,7 @@ def test_health_check_skips_when_none():
 
 
 def test_health_check_skips_when_recently_notified():
-    """Dédup sick = 7 jours — notifié il y a 3 jours → skip."""
+    # dédup sick = 7 jours, notifié il y a 3 → skip
     with patch("plantiq.engine.send") as mock_send:
         _rule_health_check(
             _conn(), PLANT,
@@ -367,7 +366,7 @@ def test_health_check_skips_when_snoozed():
     mock_send.assert_not_called()
 
 
-# ── _rule_repotting ───────────────────────────────────────────────────────────
+# --- _rule_repotting
 
 def test_repotting_fires_when_urgent():
     with patch("plantiq.engine.send") as mock_send:
@@ -379,7 +378,7 @@ def test_repotting_fires_when_urgent():
 
 
 def test_repotting_fires_when_overdue_by_calendar():
-    """freq=12 mois, rempotage il y a ~14 mois → déclenche."""
+    # freq=12 mois, rempotage il y a ~14 mois → déclenche
     old = TODAY - timedelta(days=420)
     with patch("plantiq.engine.send") as mock_send:
         _rule_repotting(
@@ -408,7 +407,7 @@ def test_repotting_fires_when_soil_exhausted():
 
 
 def test_repotting_skips_when_not_triggered():
-    """Rempotage il y a ~6 mois (< 12), sol correct, pas urgent → skip."""
+    # ~6 mois depuis le dernier rempotage (< 12), sol correct → skip
     with patch("plantiq.engine.send") as mock_send:
         _rule_repotting(
             _conn(), PLANT, _profile(), _container(),
@@ -426,7 +425,7 @@ def test_repotting_skips_when_snoozed():
     mock_send.assert_not_called()
 
 
-# ── _rule_fertilizing ─────────────────────────────────────────────────────────
+# --- _rule_fertilizing
 
 def test_fertilizing_fires_in_summer_when_overdue():
     with patch("plantiq.engine.send") as mock_send:
@@ -466,7 +465,7 @@ def test_fertilizing_skips_when_sick():
 
 
 def test_fertilizing_skips_when_repotted_recently():
-    """Rempotage il y a 30 jours < 60 → cooldown actif."""
+    # cooldown de 60j post-rempotage — 30 jours ne suffit pas
     with patch("plantiq.engine.send") as mock_send:
         _rule_fertilizing(
             _conn(), PLANT, _profile(), _container(last_repotted=TODAY - timedelta(days=30)),

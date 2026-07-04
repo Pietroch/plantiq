@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))  # ensure tests/ is on path
 
 from engine_dry import run_dry
 
-# ── Plant fixtures ────────────────────────────────────────────────────────────
+# --- plant fixtures
 
 PLANT_FIXTURES = [
     {
@@ -134,7 +134,7 @@ PLANT_FIXTURES = [
     },
 ]
 
-# ── Random context generation ─────────────────────────────────────────────────
+# --- random context generation
 
 STATUSES    = ["healthy", "sick", "recovering", "burned", "dormant", "dying"]
 ISSUE_TYPES = ["overwatering", "underwatering", "pest", "disease", "sunburn", "rootbound", "none"]
@@ -218,7 +218,7 @@ def random_context(plant_id: str, today: date) -> dict:
     }
 
 
-# ── Report generation ─────────────────────────────────────────────────────────
+# --- report generation
 
 def generate_report(results: list[dict], output_path: str, seed: int) -> None:
     lines = [
@@ -289,7 +289,7 @@ def generate_report(results: list[dict], output_path: str, seed: int) -> None:
         f.write("\n".join(lines))
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# --- entry point
 
 def run_simulation(seed: int | None = None) -> str:
     if seed is None:
