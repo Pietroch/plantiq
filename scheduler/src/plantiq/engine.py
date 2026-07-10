@@ -28,6 +28,13 @@ _WATERING_MODE_LABELS = {
 
 # --- helpers
 
+def _active_issue(health: dict | None) -> str | None:
+    # A resolved health issue must stop affecting frequency/quantity — only "resolved_at" marks that
+    if not health or health.get("resolved_at"):
+        return None
+    return health.get("issue_type")
+
+
 def has_mold(container: dict | None) -> bool:
     if not container:
         return False
@@ -52,7 +59,7 @@ def apply_quantity_modifiers(qty: int, weather: dict | None, container: dict | N
         qty = int(qty * 1.20)
     if container and not container.get("has_drainage", True):
         qty = int(qty * 0.50)
-    if health and health.get("issue_type") == "overwatering":
+    if _active_issue(health) == "overwatering":
         qty = int(qty * 0.50)
     if container and container.get("pot_type") == "terracotta":
         qty = int(qty * 1.10)
@@ -144,7 +151,7 @@ def _rule_weather_warning(conn, plant, profile, pl, weather, health, last_notifs
     near_ac    = pl.get("near_ac", False) if pl else False
     temp_max_c  = profile.get("temp_max_c") if profile else None
     temp_min_c  = profile.get("temp_min_c") if profile else None
-    issue_type  = health.get("issue_type") if health else None
+    issue_type  = _active_issue(health)
 
     lines = []
     if temp_max_c and temp_max > temp_max_c:
@@ -302,7 +309,7 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
 
     # Health modifiers
     if health:
-        issue  = health.get("issue_type")
+        issue  = _active_issue(health)
         status = health.get("status")
         if issue == "overwatering":
             freq += 5
@@ -342,7 +349,7 @@ def _rule_watering(conn, plant, profile, pl, container, accessories, health, wea
         lines.append("Chaleur importante - arrosage prioritaire.")
     if condition == "rainy" and not is_indoor:
         lines.append("Pluie en cours - quantité allégée.")
-    if health and health.get("issue_type") == "overwatering":
+    if _active_issue(health) == "overwatering":
         lines.append("Surrosage passé - laisser sécher entre les arrosages.")
     if pl and pl.get("shade"):
         lines.append("Plante ombragée - vérifier le substrat avant d'arroser.")
@@ -361,7 +368,7 @@ def _rule_misting(conn, plant, profile, pl, container, health, weather, care_log
         return
     if profile.get("humidity_level") != "high":
         return
-    if health and health.get("issue_type") == "overwatering":
+    if _active_issue(health) == "overwatering":
         return
     if has_mold(container):
         return
