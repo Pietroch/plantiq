@@ -4,14 +4,18 @@ name: plantiq
 
 services:
 
-  scheduler:
+  web:
     build:
       context: .
-      dockerfile: scheduler/Dockerfile
-    container_name: plantiq_scheduler
-    restart: "no"
+      dockerfile: app/Dockerfile
+    container_name: plantiq_web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    command: flask --app plantiq.web.app run --host 0.0.0.0 --port 8000 --debug
     volumes:
-      - ./scheduler/src:/app/src
-      - ./scheduler/tests:/app/tests
+      - ./app/src:/app/src
+      - ./app/tests:/app/tests
+      - ./db:/app/db
     env_file:
       - .env

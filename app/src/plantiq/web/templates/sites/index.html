@@ -1,0 +1,49 @@
+<!-- app/src/plantiq/web/templates/sites/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Sites{% endblock %}
+
+{% block content %}
+<h1>Sites</h1>
+
+<p><a href="{{ url_for('home.index') }}">Retour à l'accueil</a></p>
+
+<h2>Liste</h2>
+
+{% if sites %}
+<table border="1">
+  <tr>
+    <th>id</th>
+    {% for field in fields %}<th>{{ field }}</th>{% endfor %}
+    <th>actions</th>
+  </tr>
+  {% for site in sites %}
+  <tr>
+    <td>{{ site.id }}</td>
+    {% for field in fields %}<td>{{ site[field] if site[field] is not none else "" }}</td>{% endfor %}
+    <td>
+      <a href="{{ url_for('sites.edit', site_id=site.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('sites.close', site_id=site.id) }}">
+        <button type="submit">Clôturer</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucun site.</p>
+{% endif %}
+
+<h2>Ajouter un site</h2>
+
+<form method="post" action="{{ url_for('sites.create') }}">
+  <p><label>Nom <input type="text" name="name" required></label></p>
+  <p><label>Adresse <input type="text" name="address"></label></p>
+  <p><label>Ville <input type="text" name="city"></label></p>
+  <p><label>Code pays <input type="text" name="country_code" maxlength="2"></label></p>
+  <p><label>Latitude <input type="text" name="latitude" required></label></p>
+  <p><label>Longitude <input type="text" name="longitude" required></label></p>
+  <p><button type="submit">Ajouter</button></p>
+</form>
+{% endblock %}

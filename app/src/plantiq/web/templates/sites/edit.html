@@ -1,0 +1,21 @@
+<!-- app/src/plantiq/web/templates/sites/edit.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Modifier un site{% endblock %}
+
+{% block content %}
+<h1>Modifier le site {{ site.id }}</h1>
+
+<p><a href="{{ url_for('sites.index') }}">Retour à la liste</a></p>
+
+<form method="post" action="{{ url_for('sites.update', site_id=site.id) }}">
+  <p><label>Nom <input type="text" name="name" value="{{ site.name if site.name is not none else "" }}" required></label></p>
+  <p><label>Adresse <input type="text" name="address" value="{{ site.address if site.address is not none else "" }}"></label></p>
+  <p><label>Ville <input type="text" name="city" value="{{ site.city if site.city is not none else "" }}"></label></p>
+  <p><label>Code pays <input type="text" name="country_code" value="{{ site.country_code if site.country_code is not none else "" }}" maxlength="2"></label></p>
+  <p><label>Latitude <input type="text" name="latitude" value="{{ site.latitude if site.latitude is not none else "" }}" required></label></p>
+  <p><label>Longitude <input type="text" name="longitude" value="{{ site.longitude if site.longitude is not none else "" }}" required></label></p>
+  <p><button type="submit">Enregistrer</button></p>
+</form>
+{% endblock %}

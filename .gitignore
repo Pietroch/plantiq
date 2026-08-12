@@ -3,8 +3,4 @@
 .env
 *.pyc
 __pycache__/
-.venv/
-.pytest_cache/
 *.egg-info/
-dist/
-scheduler/tests/simulation_report.md

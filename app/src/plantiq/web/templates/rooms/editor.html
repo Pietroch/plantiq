@@ -1,0 +1,602 @@
+<!-- app/src/plantiq/web/templates/rooms/editor.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Dessiner une pièce{% endblock %}
+
+{% block content %}
+<h1>Dessiner une pièce</h1>
+
+<p><a href="{{ url_for('rooms.index') }}">Retour à la liste</a></p>
+
+<h2>Identité</h2>
+
+{% if not sites %}
+<p><strong>Aucun site enregistré.</strong> Une pièce appartient à un site —
+   <a href="{{ url_for('sites.index') }}">en créer un d'abord</a>.</p>
+{% endif %}
+
+<p>
+  <label>Site
+    <select id="site_id">
+      {% for site in sites %}
+      <option value="{{ site.id }}">{{ site.name }}{% if site.city %} — {{ site.city }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Nom <input type="text" id="name" value="Séjour"></label>
+  <label>Étage <input type="number" id="floor" value="0" style="width:4em"></label>
+</p>
+
+<p>
+  <label><input type="radio" name="environment" value="indoor" checked> Intérieur</label>
+  <label><input type="radio" name="environment" value="outdoor"> Extérieur</label>
+</p>
+
+<h2>Outil</h2>
+
+<p>
+  <label><input type="radio" name="mode" value="trace" checked> Tracer les murs</label>
+  <label><input type="radio" name="mode" value="move"> Déplacer les sommets</label>
+  <label><input type="radio" name="mode" value="element"> Poser un élément</label>
+  <label><input type="radio" name="mode" value="scale"> Calibrer un mur</label>
+</p>
+
+<p>
+  <label>Élément à poser
+    <select id="element_type">
+      {% for value, label in labels.items() %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label><input type="checkbox" id="snap" checked> Magnétisme sur la grille</label>
+</p>
+
+<p id="hint"></p>
+
+<div style="display:flex; gap:1em; align-items:flex-start">
+
+  <svg id="plan" width="820" height="560" style="border:1px solid black; background:white"></svg>
+
+  <div style="width:200px">
+    <h3>Orientation</h3>
+    <svg id="compass" width="200" height="200" style="border:1px solid black; background:white"></svg>
+    <p id="north_readout" style="font-size:1.6em"></p>
+    <p>Le repère noir en haut de la rose indique la direction du haut du plan.
+       Faire tourner la rose à la souris — Maj bloque sur les huit directions.</p>
+  </div>
+
+</div>
+
+<h2>Éléments posés</h2>
+
+<div id="elements_panel"></div>
+
+<h2>Mesures</h2>
+
+<div id="info"></div>
+
+<p>
+  <button id="save">Enregistrer</button>
+  <button id="reset">Tout effacer</button>
+  <span id="status"></span>
+</p>
+
+<script id="labels" type="application/json">{{ labels | tojson }}</script>
+
+<script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+const GRID = 20;
+const CLOSE_RADIUS = 10;
+const COLORS = { window: "blue", radiator: "red", air_conditioner: "green" };
+const LABELS = JSON.parse(document.getElementById("labels").textContent);
+
+const plan = document.getElementById("plan");
+const info = document.getElementById("info");
+const hint = document.getElementById("hint");
+const status = document.getElementById("status");
+
+const state = {
+  mode: "trace",
+  vertices: [],
+  elements: [],
+  closed: false,
+  scale: null,
+  pending: null,
+  dragIndex: null,
+  northAngle: 0,
+  selected: null,
+};
+
+const HINTS = {
+  trace: "Clic pour poser un sommet. Maj contraint à l'horizontale ou la verticale. Ctrl+Z retire le dernier. Cliquer le premier sommet ferme le contour.",
+  move: "Glisser un sommet pour le déplacer.",
+  element: "Deux clics sur un mur : début puis fin de l'élément.",
+  scale: "Cliquer un mur pour déclarer sa longueur réelle.",
+};
+
+// --- geometry helpers
+
+function snap(value) {
+  return document.getElementById("snap").checked ? Math.round(value / GRID) * GRID : value;
+}
+
+function mousePoint(event) {
+  const box = plan.getBoundingClientRect();
+  return { x: event.clientX - box.left, y: event.clientY - box.top };
+}
+
+function wallCount() {
+  const n = state.vertices.length;
+  return state.closed ? n : Math.max(0, n - 1);
+}
+
+function wallAt(index) {
+  const n = state.vertices.length;
+  return [state.vertices[index], state.vertices[(index + 1) % n]];
+}
+
+function projectOnWalls(point) {
+  let best = null;
+  for (let i = 0; i < wallCount(); i++) {
+    const [a, b] = wallAt(i);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const squared = dx * dx + dy * dy;
+    if (squared === 0) continue;
+    let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / squared;
+    t = Math.max(0, Math.min(1, t));
+    const px = a.x + t * dx, py = a.y + t * dy;
+    const distance = Math.hypot(point.x - px, point.y - py);
+    if (best === null || distance < best.distance) {
+      best = { distance, wallIndex: i, t, x: px, y: py };
+    }
+  }
+  return best;
+}
+
+function pointOnWall(wallIndex, t) {
+  const [a, b] = wallAt(wallIndex);
+  return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+}
+
+function wallLength(index) {
+  const [a, b] = wallAt(index);
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function area() {
+  let total = 0;
+  const n = state.vertices.length;
+  for (let i = 0; i < n; i++) {
+    const a = state.vertices[i], b = state.vertices[(i + 1) % n];
+    total += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(total) / 2;
+}
+
+function orthogonal(from, to) {
+  return Math.abs(to.x - from.x) > Math.abs(to.y - from.y)
+    ? { x: to.x, y: from.y }
+    : { x: from.x, y: to.y };
+}
+
+// --- rendering
+
+function element(name, attributes) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const key in attributes) node.setAttribute(key, attributes[key]);
+  return node;
+}
+
+function drawGrid() {
+  const group = element("g", {});
+  const width = plan.width.baseVal.value;
+  const height = plan.height.baseVal.value;
+  for (let x = 0; x <= width; x += GRID) {
+    group.appendChild(element("line", { x1: x, y1: 0, x2: x, y2: height, stroke: "#eee" }));
+  }
+  for (let y = 0; y <= height; y += GRID) {
+    group.appendChild(element("line", { x1: 0, y1: y, x2: width, y2: y, stroke: "#eee" }));
+  }
+  return group;
+}
+
+function redraw() {
+  plan.replaceChildren(drawGrid());
+
+  if (state.closed && state.vertices.length > 2) {
+    const points = state.vertices.map(v => `${v.x},${v.y}`).join(" ");
+    plan.appendChild(element("polygon", { points, fill: "#f5f5f5", stroke: "black", "stroke-width": 2 }));
+  } else {
+    for (let i = 0; i < state.vertices.length - 1; i++) {
+      const a = state.vertices[i], b = state.vertices[i + 1];
+      plan.appendChild(element("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: "black", "stroke-width": 2 }));
+    }
+  }
+
+  // Wall numbers, so the wall_index stored with each element stays readable
+  for (let i = 0; i < wallCount(); i++) {
+    const middle = pointOnWall(i, 0.5);
+    const highlight = state.scale && state.scale.wall_index === i;
+    plan.appendChild(element("text", {
+      x: middle.x, y: middle.y - 4, "font-size": 11,
+      "text-anchor": "middle", fill: highlight ? "purple" : "#888",
+    })).textContent = highlight ? `mur ${i} · ${state.scale.cm} cm` : `mur ${i}`;
+  }
+
+  state.elements.forEach((item, index) => {
+    const start = pointOnWall(item.wall_index, item.t_start);
+    const end = pointOnWall(item.wall_index, item.t_end);
+    const chosen = index === state.selected;
+    if (chosen) {
+      plan.appendChild(element("line", {
+        x1: start.x, y1: start.y, x2: end.x, y2: end.y,
+        stroke: "orange", "stroke-width": 12, "stroke-linecap": "butt",
+      }));
+    }
+    plan.appendChild(element("line", {
+      x1: start.x, y1: start.y, x2: end.x, y2: end.y,
+      stroke: COLORS[item.type] || "black", "stroke-width": 6, "stroke-linecap": "butt",
+      "data-element-index": index, style: "cursor:pointer",
+    }));
+  });
+
+  if (state.pending) {
+    const point = pointOnWall(state.pending.wall_index, state.pending.t);
+    plan.appendChild(element("circle", { cx: point.x, cy: point.y, r: 5, fill: "orange" }));
+  }
+
+  state.vertices.forEach((vertex, index) => {
+    plan.appendChild(element("circle", {
+      cx: vertex.x, cy: vertex.y, r: 5, fill: index === 0 ? "black" : "white",
+      stroke: "black", "data-index": index,
+    }));
+  });
+
+  renderInfo();
+  renderElements();
+}
+
+function unitsPerCm() {
+  // Always recomputed from the reference wall, never stored — moving one of its
+  // vertices recalibrates the whole room instead of silently falsifying it
+  if (!state.scale) return null;
+  const length = wallLength(state.scale.wall_index);
+  return length > 0 ? length / state.scale.cm : null;
+}
+
+function centimetres(units) {
+  const ratio = unitsPerCm();
+  return ratio ? units / ratio : null;
+}
+
+function renderInfo() {
+  const lines = [];
+  lines.push(`${state.vertices.length} sommet(s), contour ${state.closed ? "fermé" : "ouvert"}.`);
+
+  if (state.closed) {
+    const raw = area();
+    const ratio = unitsPerCm();
+    const scaled = ratio ? raw / (ratio ** 2) / 10000 : null;
+    lines.push(scaled !== null
+      ? `Surface : ${scaled.toFixed(2)} m²`
+      : `Surface : ${raw.toFixed(0)} unités² — calibrer un mur pour obtenir des mètres.`);
+  }
+
+  const walls = [];
+  for (let i = 0; i < wallCount(); i++) {
+    const length = wallLength(i);
+    const real = centimetres(length);
+    walls.push(`mur ${i} : ${real !== null ? real.toFixed(0) + " cm" : length.toFixed(0) + " u"}`);
+  }
+  if (walls.length) lines.push(walls.join(" · "));
+
+  info.innerHTML = lines.map(line => `<p>${line}</p>`).join("");
+}
+
+function renderElements() {
+  const panel = document.getElementById("elements_panel");
+  if (!state.elements.length) {
+    panel.innerHTML = "<p>Aucun élément posé. Cliquer un élément sur le plan le sélectionne ; Suppr l'efface.</p>";
+    return;
+  }
+
+  const types = Object.keys(LABELS);
+  const rows = state.elements.map((item, index) => {
+    const options = types.map(key =>
+      `<option value="${key}"${key === item.type ? " selected" : ""}>${LABELS[key]}</option>`
+    ).join("");
+    const highlight = index === state.selected ? ' style="background:#ffe0a0"' : "";
+    const span = centimetres(wallLength(item.wall_index) * (item.t_end - item.t_start));
+    return `<tr${highlight}>
+      <td>${index}</td>
+      <td><select data-action="type" data-index="${index}">${options}</select></td>
+      <td>mur ${item.wall_index}</td>
+      <td><input type="number" step="0.05" min="0" max="1" value="${item.t_start.toFixed(2)}" data-action="t_start" data-index="${index}" style="width:5em"></td>
+      <td><input type="number" step="0.05" min="0" max="1" value="${item.t_end.toFixed(2)}" data-action="t_end" data-index="${index}" style="width:5em"></td>
+      <td>${span !== null ? span.toFixed(0) + " cm" : "—"}</td>
+      <td><button data-action="delete" data-index="${index}">Supprimer</button></td>
+    </tr>`;
+  }).join("");
+
+  panel.innerHTML = `<table border="1">
+    <tr><th>#</th><th>type</th><th>mur</th><th>début</th><th>fin</th><th>largeur</th><th></th></tr>
+    ${rows}
+  </table>`;
+}
+
+// --- compass
+// north_angle is where north points on the drawing: 0 is up, growing clockwise
+
+const compass = document.getElementById("compass");
+const COMPASS_CENTER = 100;
+const CARDINALS = [["N", 0], ["E", 90], ["S", 180], ["O", 270]];
+const CARDINAL_NAMES = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+
+function polar(degrees, radius) {
+  const radians = degrees * Math.PI / 180;
+  return {
+    x: COMPASS_CENTER + radius * Math.sin(radians),
+    y: COMPASS_CENTER - radius * Math.cos(radians),
+  };
+}
+
+function cardinal(degrees) {
+  return CARDINAL_NAMES[Math.round((((degrees % 360) + 360) % 360) / 45) % 8];
+}
+
+function planHeading() {
+  // Direction the top of the plan points to. North sits at northAngle on the
+  // drawing, so the upward direction reads as its mirror.
+  return (360 - state.northAngle) % 360;
+}
+
+function drawCompass() {
+  compass.replaceChildren();
+  compass.appendChild(element("circle", {
+    cx: COMPASS_CENTER, cy: COMPASS_CENTER, r: 80, fill: "none", stroke: "#bbb",
+  }));
+
+  // Graduated ring: the whole rose turns, the marker at the top stays put
+  for (let tick = 0; tick < 360; tick += 5) {
+    const major = tick % 30 === 0;
+    const outer = polar(state.northAngle + tick, 80);
+    const inner = polar(state.northAngle + tick, major ? 68 : 74);
+    compass.appendChild(element("line", {
+      x1: inner.x, y1: inner.y, x2: outer.x, y2: outer.y,
+      stroke: major ? "black" : "#aaa", "stroke-width": major ? 2 : 1,
+    }));
+    if (major) {
+      const label = polar(state.northAngle + tick, 58);
+      compass.appendChild(element("text", {
+        x: label.x, y: label.y + 3, "font-size": 9, "text-anchor": "middle", fill: "#666",
+      })).textContent = tick;
+    }
+  }
+
+  const north = polar(state.northAngle, 40);
+  const south = polar(state.northAngle + 180, 40);
+  compass.appendChild(element("line", {
+    x1: south.x, y1: south.y, x2: north.x, y2: north.y, stroke: "red", "stroke-width": 3,
+  }));
+  compass.appendChild(element("circle", { cx: north.x, cy: north.y, r: 6, fill: "red" }));
+
+  for (const [label, offset] of CARDINALS) {
+    const position = polar(state.northAngle + offset, 26);
+    compass.appendChild(element("text", {
+      x: position.x, y: position.y + 6, "font-size": 16, "text-anchor": "middle",
+    })).textContent = label;
+  }
+
+  // Fixed marker at the top of the rose — reads against the graduated ring
+  compass.appendChild(element("polygon", {
+    points: `${COMPASS_CENTER},6 ${COMPASS_CENTER - 7},18 ${COMPASS_CENTER + 7},18`, fill: "black",
+  }));
+
+  const heading = planHeading();
+  document.getElementById("north_readout").textContent =
+    `${Math.round(heading) % 360}° ${cardinal(heading)}`;
+}
+
+function setNorthFrom(event) {
+  const box = compass.getBoundingClientRect();
+  const dx = event.clientX - box.left - COMPASS_CENTER;
+  const dy = event.clientY - box.top - COMPASS_CENTER;
+  let angle = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+  if (event.shiftKey) angle = (Math.round(angle / 45) * 45) % 360;
+  state.northAngle = angle;
+  drawCompass();
+}
+
+let rotatingCompass = false;
+compass.addEventListener("mousedown", event => { rotatingCompass = true; setNorthFrom(event); });
+compass.addEventListener("mousemove", event => { if (rotatingCompass) setNorthFrom(event); });
+window.addEventListener("mouseup", () => { rotatingCompass = false; });
+
+// --- interactions
+
+function onTrace(event) {
+  let point = mousePoint(event);
+  const last = state.vertices[state.vertices.length - 1];
+
+  if (state.vertices.length >= 3) {
+    const first = state.vertices[0];
+    if (Math.hypot(point.x - first.x, point.y - first.y) < CLOSE_RADIUS) {
+      state.closed = true;
+      setMode("move");
+      redraw();
+      return;
+    }
+  }
+
+  if (event.shiftKey && last) point = orthogonal(last, point);
+  state.vertices.push({ x: snap(point.x), y: snap(point.y) });
+  redraw();
+}
+
+function onElement(event) {
+  const hit = projectOnWalls(mousePoint(event));
+  if (!hit) return;
+
+  if (!state.pending) {
+    state.pending = { wall_index: hit.wallIndex, t: hit.t };
+  } else if (state.pending.wall_index !== hit.wallIndex) {
+    status.textContent = "Les deux clics doivent viser le même mur.";
+    state.pending = null;
+  } else {
+    const [t_start, t_end] = [state.pending.t, hit.t].sort((a, b) => a - b);
+    if (t_end - t_start > 0.001) {
+      state.elements.push({
+        type: document.getElementById("element_type").value,
+        wall_index: hit.wallIndex, t_start, t_end,
+      });
+      status.textContent = "";
+    }
+    state.pending = null;
+  }
+  redraw();
+}
+
+function onScale(event) {
+  const hit = projectOnWalls(mousePoint(event));
+  if (!hit) return;
+  const answer = prompt(`Longueur réelle du mur ${hit.wallIndex}, en centimètres ?`);
+  const value = parseFloat((answer || "").replace(",", "."));
+  if (!value || value <= 0) return;
+  // Only the reference is stored; the ratio is derived on demand
+  state.scale = { wall_index: hit.wallIndex, cm: value };
+  redraw();
+}
+
+plan.addEventListener("click", event => {
+  // Clicking straight on an element selects it, whatever the current tool
+  const clicked = event.target.dataset && event.target.dataset.elementIndex;
+  if (clicked !== undefined && clicked !== null && clicked !== "") {
+    state.selected = parseInt(clicked, 10);
+    redraw();
+    return;
+  }
+  state.selected = null;
+  if (state.mode === "trace" && !state.closed) onTrace(event);
+  else if (state.mode === "element") onElement(event);
+  else if (state.mode === "scale") onScale(event);
+  else redraw();
+});
+
+const panel = document.getElementById("elements_panel");
+
+panel.addEventListener("change", event => {
+  const action = event.target.dataset.action;
+  if (!action) return;
+  const item = state.elements[parseInt(event.target.dataset.index, 10)];
+
+  if (action === "type") {
+    item.type = event.target.value;
+  } else {
+    item[action] = Math.max(0, Math.min(1, parseFloat(event.target.value) || 0));
+    // Mirrors the DDL constraint: 0 <= t_start < t_end <= 1
+    if (item.t_start >= item.t_end) {
+      if (action === "t_start") item.t_start = Math.max(0, item.t_end - 0.01);
+      else item.t_end = Math.min(1, item.t_start + 0.01);
+    }
+  }
+  redraw();
+});
+
+panel.addEventListener("click", event => {
+  if (event.target.dataset.action !== "delete") return;
+  state.elements.splice(parseInt(event.target.dataset.index, 10), 1);
+  state.selected = null;
+  redraw();
+});
+
+plan.addEventListener("mousedown", event => {
+  if (state.mode !== "move") return;
+  const index = event.target.getAttribute && event.target.getAttribute("data-index");
+  if (index !== null && index !== undefined) state.dragIndex = parseInt(index, 10);
+});
+
+plan.addEventListener("mousemove", event => {
+  if (state.dragIndex === null) return;
+  let point = mousePoint(event);
+  if (event.shiftKey) {
+    const n = state.vertices.length;
+    const previous = state.vertices[(state.dragIndex - 1 + n) % n];
+    point = orthogonal(previous, point);
+  }
+  state.vertices[state.dragIndex] = { x: snap(point.x), y: snap(point.y) };
+  redraw();
+});
+
+window.addEventListener("mouseup", () => { state.dragIndex = null; });
+
+document.addEventListener("keydown", event => {
+  // Undo is limited to the tracing step, where mistakes actually cost something
+  if (event.ctrlKey && event.key === "z" && state.mode === "trace" && !state.closed) {
+    state.vertices.pop();
+    redraw();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.selected !== null) {
+    if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT") return;
+    event.preventDefault();
+    state.elements.splice(state.selected, 1);
+    state.selected = null;
+    redraw();
+  }
+});
+
+function setMode(mode) {
+  state.mode = mode;
+  state.pending = null;
+  document.querySelector(`input[name=mode][value=${mode}]`).checked = true;
+  hint.textContent = HINTS[mode];
+}
+
+document.querySelectorAll("input[name=mode]").forEach(radio => {
+  radio.addEventListener("change", () => setMode(radio.value));
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  state.vertices = [];
+  state.elements = [];
+  state.closed = false;
+  state.scale = null;
+  state.pending = null;
+  state.selected = null;
+  setMode("trace");
+  status.textContent = "";
+  redraw();
+});
+
+document.getElementById("save").addEventListener("click", async () => {
+  status.textContent = "Enregistrement…";
+  const response = await fetch("{{ url_for('rooms.create') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      site_id: parseInt(document.getElementById("site_id").value, 10),
+      name: document.getElementById("name").value,
+      floor: parseInt(document.getElementById("floor").value, 10),
+      environment: document.querySelector("input[name=environment]:checked").value,
+      north_angle: Math.round(state.northAngle) % 360,
+      scale: state.scale,
+      closed: state.closed,
+      vertices: state.vertices,
+      elements: state.elements,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    status.textContent = "Refusé : " + payload.error;
+    return;
+  }
+  window.location = payload.redirect;
+});
+
+setMode("trace");
+drawCompass();
+redraw();
+</script>
+{% endblock %}

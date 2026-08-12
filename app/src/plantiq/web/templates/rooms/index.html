@@ -1,0 +1,64 @@
+<!-- app/src/plantiq/web/templates/rooms/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Pièces{% endblock %}
+
+{% block content %}
+<h1>Pièces</h1>
+
+<p><a href="{{ url_for('rooms.new') }}">Dessiner une pièce</a></p>
+
+{% if rooms %}
+<table border="1">
+  <tr>
+    <th>id</th>
+    <th>nom</th>
+    <th>site</th>
+    <th>étage</th>
+    <th>milieu</th>
+    <th>nord</th>
+    <th>sommets</th>
+    <th>surface</th>
+    <th>éléments</th>
+    <th>actions</th>
+  </tr>
+  {% for room in rooms %}
+  <tr>
+    <td>{{ room.id }}</td>
+    <td>{{ room.name }}</td>
+    <td>{{ room.site_id }}</td>
+    <td>{{ room.floor if room.floor is not none else "" }}</td>
+    <td>{{ environments[room.environment] }}</td>
+    <td>{{ room.north_angle }}°</td>
+    <td>{{ room.vertices | length }}</td>
+    <td>
+      {% if room.measures.scaled %}
+        {{ "%.2f" | format(room.measures.area) }} m²
+      {% else %}
+        {{ "%.0f" | format(room.measures.area) }} unités² (non calibré)
+      {% endif %}
+    </td>
+    <td>
+      {% for element in room.elements %}
+        {{ labels[element.type] }} (mur {{ element.wall_index }})<br>
+      {% else %}
+        —
+      {% endfor %}
+    </td>
+    <td>
+      {% if room.closed_at %}
+        clôturée
+      {% else %}
+      <form method="post" action="{{ url_for('rooms.close', room_id=room.id) }}">
+        <button type="submit">Clôturer</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucune pièce.</p>
+{% endif %}
+{% endblock %}

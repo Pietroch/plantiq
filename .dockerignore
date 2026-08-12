@@ -7,8 +7,4 @@
 docs/
 *.md
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-scheduler/.venv/
-scheduler/tests/simulation_report.md
+
