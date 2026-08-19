@@ -17,27 +17,22 @@
   </label>
 </p>
 
-<h2>Nature du changement</h2>
-
-<p>
-  <label><input type="radio" name="reason" value="correction" checked>
-    <strong>Correction</strong> — le marqueur était mal posé, la plante n'a pas bougé.
-    La ligne existante est mise à jour, sans historique.</label>
-</p>
-<p>
-  <label><input type="radio" name="reason" value="move">
-    <strong>Déplacement</strong> — la plante a réellement changé de place.
-    La période en cours est close, une nouvelle commence.</label>
-</p>
+<p>Deux gestes différents, deux boutons : il n'y a pas de choix par défaut, parce
+   qu'un défaut silencieux finit par écraser un historique.</p>
 
 <p id="hint">Cliquer dans la pièce pour poser le marqueur ailleurs, ou le glisser directement.</p>
 
 <svg id="plan" width="820" height="560" style="border:1px solid black; background:white"></svg>
 
 <p>
-  <button id="save">Enregistrer</button>
-  <span id="status"></span>
+  <button id="correct">Corriger la position</button>
+  <span>le marqueur était mal posé, la plante n'a pas bougé — la ligne actuelle est mise à jour</span>
 </p>
+<p>
+  <button id="relocate">Enregistrer un déplacement</button>
+  <span>la plante a réellement changé de place — la période en cours est close, une nouvelle commence</span>
+</p>
+<p><span id="status"></span></p>
 
 <script id="geometry" type="application/json">{{ geometry | tojson }}</script>
 <script src="{{ url_for('static', filename='plan.js') }}"></script>
@@ -109,13 +104,13 @@ plan.addEventListener("click", event => {
   setMarker(inside, false);
 });
 
-document.getElementById("save").addEventListener("click", async () => {
+async function save(reason) {
   status.textContent = "Enregistrement…";
   const response = await fetch(window.location.pathname, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      reason: document.querySelector("input[name=reason]:checked").value,
+      reason,
       height_cm: document.getElementById("height_cm").value,
       x: marker.x,
       y: marker.y,
@@ -127,7 +122,12 @@ document.getElementById("save").addEventListener("click", async () => {
     return;
   }
   window.location = payload.redirect;
-});
+}
+
+// One button per intention: nothing is pre-selected, so nothing can be
+// submitted by accident
+document.getElementById("correct").addEventListener("click", () => save("correction"));
+document.getElementById("relocate").addEventListener("click", () => save("move"));
 
 redraw();
 </script>
