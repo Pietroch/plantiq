@@ -1,0 +1,124 @@
+<!-- app/src/plantiq/web/templates/species/_form.html -->
+
+{# Shared by creation and edition: item is None when creating #}
+
+<form method="post" action="{{ action }}">
+
+  <h3>Identité</h3>
+  <p>
+    <label>Nom scientifique
+      <input type="text" name="scientific_name" required
+             value="{{ item.scientific_name if item else '' }}"></label>
+    <label>Nom commun
+      <input type="text" name="common_name"
+             value="{{ item.common_name if item and item.common_name else '' }}"></label>
+  </p>
+
+  <h3>Lumière et température</h3>
+  <p>
+    <label>Exposition minimale
+      <select name="exposure_min">
+        {% for key, label in exposures.items() %}
+        <option value="{{ key }}"
+          {{ " selected" if key == (item.exposure_min if item else "indirect") }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Exposition maximale
+      <select name="exposure_max">
+        {% for key, label in exposures.items() %}
+        <option value="{{ key }}"
+          {{ " selected" if key == (item.exposure_max if item else "bright_indirect") }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Tolérance au soleil
+      <select name="sun_tolerance">
+        {% for key, label in sun_tolerances.items() %}
+        <option value="{{ key }}"
+          {{ " selected" if key == (item.sun_tolerance if item else "none") }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </p>
+  <p>
+    <label>Température min
+      <input type="number" name="temp_min_c" style="width:5em"
+             value="{{ item.temp_min_c if item else 12 }}"> °C</label>
+    <label>Température max
+      <input type="number" name="temp_max_c" style="width:5em"
+             value="{{ item.temp_max_c if item else 30 }}"> °C</label>
+  </p>
+
+  <h3>Arrosage</h3>
+  <p>
+    <label>Volume par litre de substrat
+      <input type="number" name="watering_ml_per_litre" min="1" style="width:6em"
+             value="{{ item.watering_ml_per_litre if item else 40 }}"> ml
+    </label>
+  </p>
+  <p>Intervalle par saison — les quatre sont obligatoires.</p>
+  <p>
+    {% for key, label in seasons.items() %}
+    <label>{{ label }}
+      <input type="number" name="interval_{{ key }}" min="1" style="width:5em"
+             value="{{ intervals.get(key, 7) }}"> j
+    </label>
+    {% endfor %}
+  </p>
+
+  <h3>Fertilisation</h3>
+  <p>
+    <label>Intervalle
+      <input type="number" name="fertilizing_interval_days" min="1" style="width:5em"
+             value="{{ item.fertilizing_interval_days if item and item.fertilizing_interval_days else '' }}"> jours</label>
+    <label>De
+      <select name="fertilizing_month_start">
+        <option value="">—</option>
+        {% for number, label in months.items() %}
+        <option value="{{ number }}"
+          {{ " selected" if item and item.fertilizing_month_start == number }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>à
+      <select name="fertilizing_month_end">
+        <option value="">—</option>
+        {% for number, label in months.items() %}
+        <option value="{{ number }}"
+          {{ " selected" if item and item.fertilizing_month_end == number }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </p>
+
+  <h3>Rempotage</h3>
+  <p>
+    <label>Intervalle
+      <input type="number" name="repotting_interval_months" min="1" style="width:5em"
+             value="{{ item.repotting_interval_months if item and item.repotting_interval_months else '' }}"> mois</label>
+    <label>De
+      <select name="repotting_month_start">
+        <option value="">—</option>
+        {% for number, label in months.items() %}
+        <option value="{{ number }}"
+          {{ " selected" if item and item.repotting_month_start == number }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>à
+      <select name="repotting_month_end">
+        <option value="">—</option>
+        {% for number, label in months.items() %}
+        <option value="{{ number }}"
+          {{ " selected" if item and item.repotting_month_end == number }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </p>
+
+  <p>Une fenêtre dont le mois de début est postérieur au mois de fin enjambe le nouvel an :
+     d'octobre à mars se saisit ainsi.</p>
+
+  <p><button type="submit">{{ submit_label }}</button></p>
+</form>

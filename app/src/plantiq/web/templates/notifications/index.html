@@ -1,0 +1,33 @@
+<!-- app/src/plantiq/web/templates/notifications/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Notifications{% endblock %}
+
+{% block content %}
+<h1>Notifications envoyées</h1>
+
+<p>Trace de ce qui est parti sur le téléphone. Écrite par la tâche quotidienne,
+   en lecture seule — une ligne par plante, action et jour.</p>
+
+{% if notifications %}
+<table border="1">
+  <tr>
+    <th>envoyée le</th><th>heure</th><th>plante</th><th>action</th>
+    <th>rappel</th><th>contenu</th>
+  </tr>
+  {% for item in notifications %}
+  <tr>
+    <td>{{ item.sent_on.strftime("%d/%m/%Y") }}</td>
+    <td>{{ item.sent_at.strftime("%H:%M") }}</td>
+    <td><a href="{{ url_for('plants.detail', plant_id=item.plant_id) }}">{{ item.plant_name }}</a></td>
+    <td>{{ actions[item.action] }}</td>
+    <td>{{ ("échéance " ~ item.due_on.strftime("%d/%m/%Y")) if item.due_on else "—" }}</td>
+    <td>{{ item.payload if item.payload else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucune notification envoyée.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,19 @@
+<!-- app/src/plantiq/web/templates/species/edit.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Modifier une espèce{% endblock %}
+
+{% block content %}
+<h1>{{ item.scientific_name }}</h1>
+
+<p><a href="{{ url_for('species.index') }}">Retour au dictionnaire</a></p>
+
+{% if error %}
+<p><strong>Refusé : {{ error }}</strong></p>
+{% endif %}
+
+{% with action = url_for("species.update", species_id=item.id), submit_label = "Enregistrer" %}
+  {% include "species/_form.html" %}
+{% endwith %}
+{% endblock %}

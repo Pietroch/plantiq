@@ -1,0 +1,49 @@
+<!-- app/src/plantiq/web/templates/plants/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Plantes{% endblock %}
+
+{% block content %}
+<h1>Plantes</h1>
+
+<p><a href="{{ url_for('plants.new') }}">Ajouter une plante</a></p>
+
+{% if plants %}
+<table border="1">
+  <tr>
+    <th>id</th><th>nom</th><th>espèce</th><th>site</th><th>pièce</th>
+    <th>position</th><th>hauteur</th><th>pot</th>
+    <th>achetée le</th><th>prix</th><th>vendeur</th><th>actions</th>
+  </tr>
+  {% for plant in plants %}
+  <tr>
+    <td>{{ plant.id }}</td>
+    <td><a href="{{ url_for('plants.detail', plant_id=plant.id) }}">{{ plant.name }}</a></td>
+    <td>{{ plant.scientific_name }}</td>
+    <td>{{ plant.site_name }}</td>
+    <td>{{ plant.room_name }}</td>
+    <td>{{ "%.0f" | format(plant.x) }}, {{ "%.0f" | format(plant.y) }}</td>
+    <td>{{ (plant.height_cm | int ~ " cm") if plant.height_cm is not none else "sol" }}</td>
+    <td>
+      {%- if plant.pot_name -%}
+        {{ plant.pot_name }}{% if plant.pot_volume_l %} ({{ plant.pot_volume_l | float | round(1) }} L){% endif %}
+      {%- else -%}—{%- endif -%}
+    </td>
+    <td>{{ plant.purchased_on.strftime("%d/%m/%Y") if plant.purchased_on else "" }}</td>
+    <td>{{ (plant.price_eur | float | round(2) ~ " €") if plant.price_eur is not none else "" }}</td>
+    <td>{{ plant.retailer or "" }}</td>
+    <td>
+      <a href="{{ url_for('plants.move', plant_id=plant.id) }}">Déplacer</a>
+      <a href="{{ url_for('plants.pot', plant_id=plant.id) }}">Rempoter</a>
+      <form method="post" action="{{ url_for('plants.close', plant_id=plant.id) }}">
+        <button type="submit">Clôturer</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucune plante.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,110 @@
+<!-- app/src/plantiq/web/templates/equipment/_form.html -->
+
+{# Shared by creation and edition: item is None when creating #}
+
+<form method="post" action="{{ action }}">
+  <p>
+    <label>Type
+      <select name="type">
+        {% for key, label in types.items() %}
+        <option value="{{ key }}"{{ " selected" if key == (item.type if item else "pot") }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Nom <input type="text" name="name" required
+           value="{{ item.name if item else '' }}" placeholder="Pot terre cuite 20 cm"></label>
+  </p>
+  <p>
+    <label>Volume de substrat
+      <input type="number" name="volume_l" min="0" step="0.1" style="width:6em"
+             value="{{ item.volume_l if item and item.volume_l else '' }}"> litres</label>
+    <span>— calculé depuis les dimensions, modifiable</span>
+    <label>Matière
+      <select name="material_id">
+        <option value="">—</option>
+        {% for material in materials %}
+        <option value="{{ material.id }}"{{ " selected" if item and item.material_id == material.id }}>
+          {{ material.label }}{{ " (poreux)" if material.is_porous }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </p>
+  <p>Dimensions extérieures — ce qu'un cache-pot doit pouvoir avaler.</p>
+  <p>
+    <label>Diamètre haut
+      <input type="number" name="outer_top_diameter_cm" min="0" step="0.1" style="width:6em"
+             value="{{ item.outer_top_diameter_cm if item and item.outer_top_diameter_cm else '' }}"> cm</label>
+    <label>Diamètre bas
+      <input type="number" name="outer_bottom_diameter_cm" min="0" step="0.1" style="width:6em"
+             value="{{ item.outer_bottom_diameter_cm if item and item.outer_bottom_diameter_cm else '' }}"> cm</label>
+    <label>Hauteur
+      <input type="number" name="outer_height_cm" min="0" step="0.1" style="width:6em"
+             value="{{ item.outer_height_cm if item and item.outer_height_cm else '' }}"> cm</label>
+  </p>
+  <p>
+    <label>Drainage
+      <select name="has_drainage">
+        <option value="unknown"{{ " selected" if item and item.has_drainage is none }}>Non renseigné</option>
+        <option value="yes"{{ " selected" if item and item.has_drainage }}>Percé</option>
+        <option value="no"{{ " selected" if item and item.has_drainage is not none and not item.has_drainage }}>Sans trou</option>
+      </select>
+    </label>
+  </p>
+
+  <p>
+    <label><input type="checkbox" name="is_nursery_pot" value="1"
+           {{ " checked" if item and item.is_nursery_pot }}>
+      Pot de culture — celui dans lequel la plante est arrivée de la jardinerie</label>
+  </p>
+
+  <div id="purchase">
+  <p>
+    <label>Acheté le <input type="date" name="purchased_on"
+           value="{{ item.purchased_on if item and item.purchased_on else '' }}"></label>
+    <label>Prix <input type="number" name="price_eur" min="0" step="0.01" style="width:6em"
+           value="{{ item.price_eur if item and item.price_eur is not none else '' }}"> €</label>
+    <label>Vendeur <input type="text" name="retailer"
+           value="{{ item.retailer if item and item.retailer else '' }}"></label>
+  </p>
+  </div>
+
+  <p><button type="submit">{{ submit_label }}</button></p>
+</form>
+
+<script>
+// A pot is a truncated cone. Outer dimensions overshoot the substrate — walls,
+// base and the few centimetres left under the rim for watering — hence the fill factor.
+const FILL_FACTOR = 0.80;
+
+const field = name => document.querySelector(`[name="${name}"]`);
+const volume = field("volume_l");
+let manual = false;
+
+volume.addEventListener("input", () => { manual = true; });
+
+function computeVolume() {
+  if (manual) return;
+  const top = parseFloat(field("outer_top_diameter_cm").value);
+  const bottom = parseFloat(field("outer_bottom_diameter_cm").value) || top;
+  const height = parseFloat(field("outer_height_cm").value);
+  if (!top || !height) return;
+  const R = top / 2, r = bottom / 2;
+  const cm3 = (Math.PI * height / 3) * (R * R + R * r + r * r);
+  volume.value = (cm3 * FILL_FACTOR / 1000).toFixed(1);
+}
+
+for (const name of ["outer_top_diameter_cm", "outer_bottom_diameter_cm", "outer_height_cm"]) {
+  field(name).addEventListener("input", computeVolume);
+}
+
+const nursery = field("is_nursery_pot");
+function togglePurchase() {
+  const hidden = nursery.checked;
+  document.getElementById("purchase").style.display = hidden ? "none" : "";
+  if (hidden) {
+    for (const name of ["purchased_on", "price_eur", "retailer"]) field(name).value = "";
+  }
+}
+nursery.addEventListener("change", togglePurchase);
+togglePurchase();
+</script>

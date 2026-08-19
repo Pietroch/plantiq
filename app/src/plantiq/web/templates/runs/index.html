@@ -1,0 +1,41 @@
+<!-- app/src/plantiq/web/templates/runs/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Exécutions{% endblock %}
+
+{% block content %}
+<h1>Exécutions du batch</h1>
+
+<p>Une ligne par passage de la tâche quotidienne. En lecture seule.</p>
+
+{% if runs %}
+<table border="1">
+  <tr>
+    <th>démarré</th><th>durée</th><th>état</th>
+    <th>sites</th><th>relevés</th><th>rappels</th><th>notifications</th><th>erreur</th>
+  </tr>
+  {% for run in runs %}
+  <tr>
+    <td>{{ run.started_at.strftime("%d/%m/%Y %H:%M") }}</td>
+    <td>{{ ("%.1f" | format(run.seconds) ~ " s") if run.seconds is not none else "—" }}</td>
+    <td>
+      {%- if run.finished_at is none -%}interrompu
+      {%- elif run.error or run.send_failed or run.sites_failed -%}<strong>en échec</strong>
+      {%- else -%}terminé{%- endif -%}
+    </td>
+    <td>{{ run.sites_ok }}{% if run.sites_failed %} <strong>+{{ run.sites_failed }} en échec</strong>{% endif %}</td>
+    <td>{{ run.readings }}</td>
+    <td>{{ run.reminders_new }}{% if run.reminders != run.reminders_new %} ({{ run.reminders }} liés){% endif %}</td>
+    <td>{{ run.sent }}{% if run.send_failed %} <strong>+{{ run.send_failed }} en échec</strong>{% endif %}</td>
+    <td>{{ run.error or "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p>Une exécution sans ligne du tout signifie que le batch n'a pas démarré — la base
+   étant injoignable, il ne pouvait pas s'enregistrer lui-même.</p>
+{% else %}
+<p>Aucune exécution enregistrée.</p>
+{% endif %}
+{% endblock %}

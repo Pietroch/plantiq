@@ -27,10 +27,10 @@
   <tr>
     <td>{{ room.id }}</td>
     <td>{{ room.name }}</td>
-    <td>{{ room.site_id }}</td>
+    <td>{{ room.site_name }}</td>
     <td>{{ room.floor if room.floor is not none else "" }}</td>
-    <td>{{ environments[room.environment] }}</td>
-    <td>{{ room.north_angle }}°</td>
+    <td>{{ environments[room.environment] if room.environment else '—' }}</td>
+    <td>{{ room.north_angle if room.north_angle is not none else '—' }}°</td>
     <td>{{ room.vertices | length }}</td>
     <td>
       {% if room.measures.scaled %}
@@ -47,13 +47,9 @@
       {% endfor %}
     </td>
     <td>
-      {% if room.closed_at %}
-        clôturée
-      {% else %}
       <form method="post" action="{{ url_for('rooms.close', room_id=room.id) }}">
         <button type="submit">Clôturer</button>
       </form>
-      {% endif %}
     </td>
   </tr>
   {% endfor %}

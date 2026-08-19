@@ -1,0 +1,33 @@
+# .github/workflows/daily-run.yml
+
+name: Daily run
+
+on:
+  schedule:
+    # 16:00 UTC — 18h Belgian summer time, 17h in winter. GitHub cron has no
+    # daylight saving, so the local hour shifts by one across the year.
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+jobs:
+  batch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: app/pyproject.toml
+
+      # Runtime dependencies only: no ruff, no pytest in production
+      - name: Install
+        run: pip install -e ./app
+
+      - name: Batch
+        run: python -m plantiq.run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENWEATHERMAP_API_KEY: ${{ secrets.OPENWEATHERMAP_API_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

@@ -1,0 +1,134 @@
+<!-- app/src/plantiq/web/templates/plants/move.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Déplacer une plante{% endblock %}
+
+{% block content %}
+<h1>{{ placement.plant_name }} — {{ placement.room_name }}</h1>
+
+<p><a href="{{ url_for('plants.index') }}">Retour à la liste</a></p>
+
+<p>
+  <label>Hauteur depuis le sol
+    <input type="number" id="height_cm" min="0" step="1" style="width:6em"
+           value="{{ placement.height_cm | int if placement.height_cm is not none else '' }}"
+           placeholder="vide = sol"> cm
+  </label>
+</p>
+
+<h2>Nature du changement</h2>
+
+<p>
+  <label><input type="radio" name="reason" value="correction" checked>
+    <strong>Correction</strong> — le marqueur était mal posé, la plante n'a pas bougé.
+    La ligne existante est mise à jour, sans historique.</label>
+</p>
+<p>
+  <label><input type="radio" name="reason" value="move">
+    <strong>Déplacement</strong> — la plante a réellement changé de place.
+    La période en cours est close, une nouvelle commence.</label>
+</p>
+
+<p id="hint">Cliquer dans la pièce pour poser le marqueur ailleurs, ou le glisser directement.</p>
+
+<svg id="plan" width="820" height="560" style="border:1px solid black; background:white"></svg>
+
+<p>
+  <button id="save">Enregistrer</button>
+  <span id="status"></span>
+</p>
+
+<script id="geometry" type="application/json">{{ geometry | tojson }}</script>
+<script src="{{ url_for('static', filename='plan.js') }}"></script>
+
+<script>
+const GEOMETRY = JSON.parse(document.getElementById("geometry").textContent);
+const plan = document.getElementById("plan");
+const status = document.getElementById("status");
+
+const origin = { x: {{ placement.x }}, y: {{ placement.y }} };
+let marker = { x: origin.x, y: origin.y };
+let dragging = false;
+let justDragged = false;
+
+function redraw() {
+  Plan.draw(plan, {
+    vertices: GEOMETRY.vertices,
+    elements: GEOMETRY.elements,
+    markers: [
+      { x: origin.x, y: origin.y, label: "position actuelle" },
+      { x: marker.x, y: marker.y, highlight: true, draggable: true },
+    ],
+  }, {
+    grid: true,
+    closed: true,
+    wallLabels: true,
+    fit: true,
+  });
+}
+
+function setMarker(point, clamped) {
+  marker = clamped ? Plan.clampInside(point, GEOMETRY.vertices) : point;
+  status.textContent = "";
+  redraw();
+}
+
+plan.addEventListener("mousedown", event => {
+  const index = event.target.dataset ? event.target.dataset.markerIndex : undefined;
+  // Marker 0 is the current position, shown for reference only
+  if (index === "1") {
+    dragging = true;
+    event.preventDefault();
+  }
+});
+
+plan.addEventListener("mousemove", event => {
+  if (!dragging) return;
+  setMarker(Plan.mousePoint(plan, event), true);
+});
+
+// click fires after mouseup: without this flag, releasing the drag
+// would run the placement handler again on the same position
+window.addEventListener("mouseup", () => {
+  justDragged = dragging;
+  dragging = false;
+});
+
+plan.addEventListener("click", event => {
+  if (justDragged) {
+    justDragged = false;
+    return;
+  }
+  const point = Plan.mousePoint(plan, event);
+  const inside = Plan.pullInside(point, GEOMETRY.vertices, Plan.TOLERANCE);
+  if (inside === null) {
+    status.textContent = "Hors de la pièce.";
+    return;
+  }
+  setMarker(inside, false);
+});
+
+document.getElementById("save").addEventListener("click", async () => {
+  status.textContent = "Enregistrement…";
+  const response = await fetch(window.location.pathname, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reason: document.querySelector("input[name=reason]:checked").value,
+      height_cm: document.getElementById("height_cm").value,
+      x: marker.x,
+      y: marker.y,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    status.textContent = "Refusé : " + payload.error;
+    return;
+  }
+  window.location = payload.redirect;
+});
+
+redraw();
+</script>
+{% endblock %}

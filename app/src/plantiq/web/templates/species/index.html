@@ -1,0 +1,67 @@
+<!-- app/src/plantiq/web/templates/species/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Espèces{% endblock %}
+
+{% block content %}
+<h1>Espèces</h1>
+
+<p>Le dictionnaire botanique ne se clôture ni ne se supprime : il ne fait que grandir.</p>
+
+{% if error %}
+<p><strong>Refusé : {{ error }}</strong></p>
+{% endif %}
+
+{% if species %}
+<table border="1">
+  <tr>
+    <th>id</th><th>nom scientifique</th><th>nom commun</th>
+    <th>ml / litre</th><th>exposition</th><th>soleil</th><th>températures</th>
+    <th>arrosage (jours)</th><th>fertilisation</th><th>rempotage</th><th>actions</th>
+  </tr>
+  {% for item in species %}
+  <tr>
+    <td>{{ item.id }}</td>
+    <td>{{ item.scientific_name }}</td>
+    <td>{{ item.common_name or "" }}</td>
+    <td>{{ item.watering_ml_per_litre }}</td>
+    <td>{{ exposures[item.exposure_min] }} → {{ exposures[item.exposure_max] }}</td>
+    <td>{{ sun_tolerances[item.sun_tolerance] }}</td>
+    <td>{{ item.temp_min_c }} à {{ item.temp_max_c }} °C</td>
+    <td>
+      {% for key, label in seasons.items() %}
+        {{ label }} {{ intervals.get(item.id, {}).get(key, "—") }}{{ "" if loop.last else " · " }}
+      {% endfor %}
+    </td>
+    <td>
+      {% if item.fertilizing_interval_days %}
+        tous les {{ item.fertilizing_interval_days }} j
+        {% if item.fertilizing_month_start %}
+          ({{ months[item.fertilizing_month_start] }} → {{ months[item.fertilizing_month_end] }})
+        {% endif %}
+      {% else %}—{% endif %}
+    </td>
+    <td>
+      {% if item.repotting_interval_months %}
+        tous les {{ item.repotting_interval_months }} mois
+        {% if item.repotting_month_start %}
+          ({{ months[item.repotting_month_start] }} → {{ months[item.repotting_month_end] }})
+        {% endif %}
+      {% else %}—{% endif %}
+    </td>
+    <td><a href="{{ url_for('species.edit', species_id=item.id) }}">Modifier</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucune espèce.</p>
+{% endif %}
+
+<h2>Ajouter une espèce</h2>
+
+{% with item = None, intervals = {}, action = url_for("species.create"),
+        submit_label = "Ajouter" %}
+  {% include "species/_form.html" %}
+{% endwith %}
+{% endblock %}

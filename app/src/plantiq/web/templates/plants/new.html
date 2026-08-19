@@ -1,0 +1,172 @@
+<!-- app/src/plantiq/web/templates/plants/new.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Ajouter une plante{% endblock %}
+
+{% block content %}
+<h1>Ajouter une plante</h1>
+
+<p><a href="{{ url_for('plants.index') }}">Retour à la liste</a></p>
+
+{% if not species %}
+<p><strong>Aucune espèce enregistrée.</strong>
+   <a href="{{ url_for('species.index') }}">En créer une d'abord</a>.</p>
+{% endif %}
+
+{% if not rooms %}
+<p><strong>Aucune pièce disponible.</strong>
+   <a href="{{ url_for('rooms.new') }}">Dessiner une pièce d'abord</a>.</p>
+{% endif %}
+
+<p>
+  <label>Espèce
+    <select id="species_id">
+      {% for item in species %}
+      <option value="{{ item.id }}">{{ item.scientific_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Nom <input type="text" id="name" placeholder="Monstera du salon"></label>
+</p>
+
+<p>
+  <label>Pièce
+    <select id="room">
+      {% for room in rooms %}
+      <option value="{{ room.version_id }}">{{ room.site_name }} — {{ room.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Hauteur depuis le sol
+    <input type="number" id="height_cm" min="0" step="1" style="width:6em" placeholder="vide = sol">
+    cm
+  </label>
+</p>
+
+<p>
+  <label>Achetée le <input type="date" id="purchased_on"></label>
+  <label>Prix <input type="number" id="price_eur" min="0" step="0.01" style="width:6em"> €</label>
+  <label>Vendeur <input type="text" id="retailer"></label>
+</p>
+
+<p>Le pot se choisit après la création, depuis la liste des plantes.</p>
+
+<p id="hint">Cliquer dans la pièce pour poser le marqueur, puis le glisser pour l'ajuster. Aucun magnétisme : une plante n'est pas accrochée à un mur, et elle peut toucher les murs.</p>
+
+<svg id="plan" width="820" height="560" style="border:1px solid black; background:white"></svg>
+
+<p>
+  <button id="save">Enregistrer</button>
+  <span id="status"></span>
+</p>
+
+<script id="geometry" type="application/json">{{ geometry | tojson }}</script>
+<script src="{{ url_for('static', filename='plan.js') }}"></script>
+
+<script>
+const GEOMETRY = JSON.parse(document.getElementById("geometry").textContent);
+const plan = document.getElementById("plan");
+const status = document.getElementById("status");
+const roomSelect = document.getElementById("room");
+
+let marker = null;
+let dragging = false;
+let justDragged = false;
+
+function currentGeometry() {
+  return GEOMETRY[roomSelect.value] || { vertices: [], elements: [] };
+}
+
+function redraw() {
+  const geometry = currentGeometry();
+  Plan.draw(plan, {
+    vertices: geometry.vertices,
+    elements: geometry.elements,
+    markers: marker ? [{ x: marker.x, y: marker.y, highlight: true, draggable: true }] : [],
+  }, {
+    grid: true,
+    closed: true,
+    wallLabels: true,
+    fit: true,
+  });
+}
+
+function setMarker(point, clamped) {
+  marker = clamped ? Plan.clampInside(point, currentGeometry().vertices) : point;
+  status.textContent = "";
+  redraw();
+}
+
+plan.addEventListener("mousedown", event => {
+  if (event.target.dataset && event.target.dataset.markerIndex !== undefined) {
+    dragging = true;
+    event.preventDefault();
+  }
+});
+
+plan.addEventListener("mousemove", event => {
+  if (!dragging) return;
+  // While dragging, the marker follows the mouse and slides along the wall
+  setMarker(Plan.mousePoint(plan, event), true);
+});
+
+// click fires after mouseup: without this flag, releasing the drag
+// would run the placement handler again on the same position
+window.addEventListener("mouseup", () => {
+  justDragged = dragging;
+  dragging = false;
+});
+
+plan.addEventListener("click", event => {
+  if (justDragged) {
+    justDragged = false;
+    return;
+  }
+  const point = Plan.mousePoint(plan, event);
+  const inside = Plan.pullInside(point, currentGeometry().vertices, Plan.TOLERANCE);
+  if (inside === null) {
+    status.textContent = "Hors de la pièce.";
+    return;
+  }
+  setMarker(inside, false);
+});
+
+roomSelect.addEventListener("change", () => {
+  marker = null;
+  status.textContent = "";
+  redraw();
+});
+
+document.getElementById("save").addEventListener("click", async () => {
+  if (!marker) {
+    status.textContent = "Poser le marqueur sur le plan.";
+    return;
+  }
+  status.textContent = "Enregistrement…";
+  const response = await fetch("{{ url_for('plants.create') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      species_id: parseInt(document.getElementById("species_id").value, 10),
+      name: document.getElementById("name").value,
+      room_version_id: parseInt(roomSelect.value, 10),
+      height_cm: document.getElementById("height_cm").value,
+      purchased_on: document.getElementById("purchased_on").value,
+      price_eur: document.getElementById("price_eur").value,
+      retailer: document.getElementById("retailer").value,
+      x: marker.x,
+      y: marker.y,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    status.textContent = "Refusé : " + payload.error;
+    return;
+  }
+  window.location = payload.redirect;
+});
+
+redraw();
+</script>
+{% endblock %}

@@ -1,0 +1,331 @@
+<!-- app/src/plantiq/web/templates/plants/detail.html -->
+
+{% extends "base.html" %}
+
+{% block title %}{{ plant.name }}{% endblock %}
+
+{% macro date(value) %}{{ value.strftime("%d/%m/%Y") if value else "—" }}{% endmacro %}
+{% macro money(value) %}{{ (value | float | round(2) ~ " €") if value is not none else "—" }}{% endmacro %}
+
+{% block content %}
+<h1>{{ plant.name }}</h1>
+
+<p>
+  <a href="{{ url_for('plants.index') }}">Retour à la liste</a> |
+  <a href="{{ url_for('plants.move', plant_id=plant.id) }}">Déplacer</a> |
+  <a href="{{ url_for('plants.pot', plant_id=plant.id) }}">Rempoter</a> |
+  <a href="{{ url_for('plants.pot', plant_id=plant.id, kind='cachepot') }}">Cache-pot</a>
+</p>
+
+<h2>Identité</h2>
+
+<table border="1">
+  <tr><th>Espèce</th><td>{{ plant.scientific_name }}{% if plant.common_name %} — {{ plant.common_name }}{% endif %}</td></tr>
+  <tr><th>Achetée le</th><td>{{ date(plant.purchased_on) }}</td></tr>
+  <tr><th>Prix</th><td>{{ money(plant.price_eur) }}</td></tr>
+  <tr><th>Vendeur</th><td>{{ plant.retailer or "—" }}</td></tr>
+  <tr><th>Enregistrée le</th><td>{{ date(plant.created_at) }}</td></tr>
+  <tr><th>Statut</th><td>{{ "clôturée le " ~ date(plant.closed_at) if plant.closed_at else "active" }}</td></tr>
+</table>
+
+<h2>Besoins de l'espèce</h2>
+
+<table border="1">
+  <tr><th>Arrosage</th>
+    <td>
+      {% for key, label in seasons.items() %}
+        {{ label }} : {{ intervals.get(key, "—") }} j{{ "" if loop.last else " · " }}
+      {% endfor %}
+    </td></tr>
+  <tr><th>Volume d'eau</th><td>{{ plant.watering_ml_per_litre }} ml par litre de substrat</td></tr>
+  <tr><th>Exposition</th><td>{{ exposures[plant.exposure_min] }} → {{ exposures[plant.exposure_max] }}</td></tr>
+  <tr><th>Soleil direct</th><td>{{ sun_tolerances[plant.sun_tolerance] }}</td></tr>
+  <tr><th>Températures</th><td>{{ plant.temp_min_c }} à {{ plant.temp_max_c }} °C</td></tr>
+  <tr><th>Fertilisation</th>
+    <td>
+      {%- if plant.fertilizing_interval_days -%}
+        tous les {{ plant.fertilizing_interval_days }} jours
+        {%- if plant.fertilizing_month_start %}, de {{ months[plant.fertilizing_month_start] }} à {{ months[plant.fertilizing_month_end] }}{% endif %}
+      {%- else -%}—{%- endif -%}
+    </td></tr>
+  <tr><th>Rempotage</th>
+    <td>
+      {%- if plant.repotting_interval_months -%}
+        tous les {{ plant.repotting_interval_months }} mois
+        {%- if plant.repotting_month_start %}, de {{ months[plant.repotting_month_start] }} à {{ months[plant.repotting_month_end] }}{% endif %}
+      {%- else -%}—{%- endif -%}
+    </td></tr>
+</table>
+
+<h2>Emplacement actuel</h2>
+
+{% if current_placement %}
+<table border="1">
+  <tr><th>Site</th><td>{{ current_placement.site_name }}{% if current_placement.city %} — {{ current_placement.city }}{% endif %}</td></tr>
+  <tr><th>Pièce</th><td>{{ current_placement.room_name }}{% if current_placement.floor is not none %} (étage {{ current_placement.floor }}){% endif %}</td></tr>
+  <tr><th>Milieu</th><td>{{ "Intérieur" if current_placement.environment == "indoor" else "Extérieur" }}</td></tr>
+  <tr><th>Coordonnées</th><td>{{ current_placement.x | float | round(0) | int }}, {{ current_placement.y | float | round(0) | int }}</td></tr>
+  <tr><th>Hauteur</th><td>{{ (current_placement.height_cm | int ~ " cm depuis le sol") if current_placement.height_cm is not none else "au sol" }}</td></tr>
+  <tr><th>Depuis le</th><td>{{ date(current_placement.created_at) }}</td></tr>
+</table>
+
+<svg id="plan" width="520" height="380" style="border:1px solid black; background:white"></svg>
+
+<script id="geometry" type="application/json">{{ geometry | tojson }}</script>
+<script src="{{ url_for('static', filename='plan.js') }}"></script>
+<script>
+const GEOMETRY = JSON.parse(document.getElementById("geometry").textContent);
+Plan.draw(document.getElementById("plan"), {
+  vertices: GEOMETRY.vertices,
+  elements: GEOMETRY.elements,
+  markers: [{
+    x: {{ current_placement.x }}, y: {{ current_placement.y }},
+    highlight: true, label: {{ plant.name | tojson }},
+  }],
+}, { grid: true, closed: true, wallLabels: true, fit: true });
+</script>
+{% else %}
+<p>Aucun emplacement actuel.</p>
+{% endif %}
+
+<h2>Pot actuel</h2>
+
+{% if current_potting %}
+<table border="1">
+  <tr><th>Pot</th><td>{{ current_potting.equipment_name }}{% if current_potting.is_nursery_pot %} <em>(pot de culture)</em>{% endif %}</td></tr>
+  <tr><th>Volume de substrat</th><td>{{ (current_potting.volume_l | float | round(1) ~ " L") if current_potting.volume_l else "—" }}</td></tr>
+  <tr><th>Dimensions</th>
+    <td>
+      {%- if current_potting.outer_top_diameter_cm -%}
+        ⌀{{ current_potting.outer_top_diameter_cm | float | round(1) }}
+        {%- if current_potting.outer_bottom_diameter_cm %} → {{ current_potting.outer_bottom_diameter_cm | float | round(1) }}{% endif %}
+        × h{{ current_potting.outer_height_cm | float | round(1) if current_potting.outer_height_cm else "?" }} cm
+      {%- else -%}—{%- endif -%}
+    </td></tr>
+  <tr><th>Matière</th><td>{{ current_potting.material_label or "—" }}{% if current_potting.is_porous %} (poreuse — le substrat sèche plus vite){% endif %}</td></tr>
+  <tr><th>Drainage</th>
+    <td>
+      {%- if current_potting.has_drainage is none -%}non renseigné
+      {%- elif current_potting.has_drainage -%}percé
+      {%- else -%}sans trou — l'eau stagne, l'intervalle s'allonge{%- endif -%}
+    </td></tr>
+  <tr><th>Cache-pot</th>
+    <td>
+      {%- if current_cachepot -%}
+        {{ current_cachepot.equipment_name }}
+        {%- if current_cachepot.has_drainage is not none %} ·
+          {{ "percé" if current_cachepot.has_drainage else "sans trou" }}{% endif %}
+      {%- else -%}aucun{%- endif -%}
+    </td></tr>
+  <tr><th>Rempotée le</th><td>{{ date(current_potting.attached_on) }}</td></tr>
+  <tr><th>Achat du pot</th>
+    <td>
+      {%- if current_potting.is_nursery_pot -%}
+        arrivé avec la plante, son coût est dans le prix de la plante
+      {%- else -%}
+        {{ date(current_potting.equipment_purchased_on) }} · {{ money(current_potting.equipment_price_eur) }}
+        {%- if current_potting.equipment_retailer %} · {{ current_potting.equipment_retailer }}{% endif %}
+      {%- endif -%}
+    </td></tr>
+</table>
+{% else %}
+<p>Aucun pot associé.</p>
+{% endif %}
+
+<h2 id="sante">Santé</h2>
+
+{% if health %}
+<p>État actuel : <strong>{{ health_statuses[health[0].status] }}</strong>,
+   observé le {{ date(health[0].noted_on) }}.</p>
+
+<table border="1">
+  <tr><th>observé le</th><th>état</th><th>note</th><th>saisi le</th><th>actions</th></tr>
+  {% for item in health %}
+  <tr>
+    <td>{{ date(item.noted_on) }}</td>
+    <td>{{ health_statuses[item.status] }}{% if loop.first %} <em>(courant)</em>{% endif %}</td>
+    <td>{{ item.note or "" }}</td>
+    <td>{{ date(item.recorded_at) }}</td>
+    <td>
+      <form method="post" action="{{ url_for('care.delete_health', health_id=item.id) }}">
+        <button type="submit">Supprimer</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Aucune observation. L'état courant est la dernière ligne enregistrée ici — il n'y a
+   pas de statut sur la plante elle-même.</p>
+{% endif %}
+
+<h3>Noter une observation</h3>
+
+<form method="post" action="{{ url_for('care.add_health', plant_id=plant.id) }}">
+  <p>
+    <label>État
+      <select name="status">
+        {% for key, label in health_statuses.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Observé le <input type="date" name="noted_on"></label>
+    <label>Note <input type="text" name="note" size="40"></label>
+    <button type="submit">Enregistrer</button>
+  </p>
+</form>
+
+<p>Chaque observation s'ajoute sans effacer la précédente : l'historique se lit de haut
+   en bas, du plus récent au plus ancien.</p>
+
+<h2 id="soins">Soins</h2>
+
+<p>
+  {% for key, label in kinds.items() %}
+    {%- if key == kind %}<strong>{{ label }}</strong>{% else %}<a href="?care={{ key }}#soins">{{ label }}</a>{% endif %}
+    {{- "" if loop.last else " | " }}
+  {% endfor %}
+</p>
+
+{% if entries %}
+<table border="1">
+  <tr><th>date</th><th>état</th><th>action</th><th>détail</th><th>actions</th></tr>
+  {% for item in entries %}
+  <tr>
+    <td>{{ item.date.strftime("%d/%m/%Y") }}</td>
+    <td>
+      {%- if item.kind == "pending" -%}en attente
+      {%- elif item.kind == "done" -%}exécuté
+      {%- else -%}notifié{%- endif -%}
+    </td>
+    <td>{{ actions[item.action] }}</td>
+    <td>
+      {%- if item.kind == "pending" -%}
+        échéance {{ item.due_on.strftime("%d/%m/%Y") }}{{ " (généré)" if item.is_generated else " (manuel)" }}
+      {%- elif item.kind == "done" -%}
+        {% if item.volume_ml %}{{ item.volume_ml }} ml{% endif %}
+        {{ item.notes or "" }}
+        <em>saisi le {{ item.recorded_at.strftime("%d/%m/%Y") }}</em>
+      {%- else -%}
+        envoyée à {{ item.sent_at.strftime("%H:%M") }}
+      {%- endif -%}
+    </td>
+    <td>
+      {% if item.kind == "pending" %}
+      <form method="post" action="{{ url_for('care.complete', reminder_id=item.id) }}">
+        <input type="date" name="done_on" value="{{ item.due_on }}">
+        {% if item.action == "watering" %}<input type="number" name="volume_ml" min="1" style="width:6em"
+               placeholder="{{ suggested_ml or '' }} ml">{% endif %}
+        <input type="text" name="notes" placeholder="note">
+        <button type="submit">Valider</button>
+      </form>
+      <form method="post" action="{{ url_for('care.dismiss', reminder_id=item.id) }}">
+        <input type="text" name="dismissed_reason" placeholder="raison">
+        <button type="submit">Écarter</button>
+      </form>
+      {% elif item.kind == "done" %}
+      <form method="post" action="{{ url_for('care.edit', care_id=item.id) }}">
+        <select name="action">
+          {% for key, label in loggable_actions.items() %}
+          <option value="{{ key }}"{{ " selected" if key == item.action }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="date" name="done_on" value="{{ item.done_at.strftime('%Y-%m-%d') }}">
+        <input type="number" name="volume_ml" min="1" style="width:6em" value="{{ item.volume_ml or '' }}">
+        <input type="text" name="notes" value="{{ item.notes or '' }}">
+        <button type="submit">Modifier</button>
+      </form>
+      <form method="post" action="{{ url_for('care.delete', care_id=item.id) }}">
+        <button type="submit">Supprimer</button>
+      </form>
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>Rien à afficher pour ce filtre.</p>
+{% endif %}
+
+<h3>Enregistrer un soin</h3>
+
+<p>Pour un arrosage rattrapé, refait, ou fait sans rappel.</p>
+
+<form method="post" action="{{ url_for('care.add', plant_id=plant.id) }}">
+  <p>
+    <label>Action
+      <select name="action">
+        {% for key, label in loggable_actions.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Le <input type="date" name="done_on"></label>
+    <label>Volume <input type="number" name="volume_ml" min="1" style="width:6em"
+           placeholder="{{ suggested_ml or '' }}"> ml</label>
+    <label>Note <input type="text" name="notes"></label>
+    <button type="submit">Enregistrer</button>
+  </p>
+</form>
+
+{% if suggested_ml %}
+<p>Volume suggéré pour cette plante : {{ suggested_ml }} ml —
+   {{ plant.watering_ml_per_litre }} ml par litre × {{ current_potting.volume_l | float | round(1) }} L de substrat.</p>
+{% endif %}
+
+<p>Le rempotage ne figure pas dans cette liste : il s'enregistre par
+   <a href="{{ url_for('plants.pot', plant_id=plant.id) }}">Rempoter</a>, qui garde le contenant et ses dates.</p>
+
+<h2>Historique du contenant</h2>
+
+<table border="1">
+  <tr><th>période</th><th>type</th><th>objet</th><th>volume</th><th>matière</th><th>état</th></tr>
+  {% for item in pottings %}
+  <tr>
+    <td>
+      {%- if item.attached_on and item.detached_on -%}
+        du {{ date(item.attached_on) }} au {{ date(item.detached_on) }}
+      {%- elif item.attached_on -%}
+        depuis le {{ date(item.attached_on) }}
+      {%- elif item.detached_on -%}
+        jusqu'au {{ date(item.detached_on) }}
+      {%- else -%}
+        date inconnue
+      {%- endif -%}
+    </td>
+    <td>{{ labels[item.equipment_type] }}</td>
+    <td>{{ item.equipment_name }}{% if item.is_nursery_pot %} <em>(culture)</em>{% endif %}</td>
+    <td>{{ (item.volume_l | float | round(1) ~ " L") if item.volume_l else "—" }}</td>
+    <td>{{ item.material_label or "—" }}</td>
+    <td>{{ "en cours" if item.closed_at is none else "close" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Aucun contenant.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Historique des emplacements</h2>
+
+<table border="1">
+  <tr><th>site</th><th>pièce</th><th>coordonnées</th><th>hauteur</th><th>depuis le</th><th>état</th></tr>
+  {% for item in placements %}
+  <tr>
+    <td>{{ item.site_name }}</td>
+    <td>{{ item.room_name }}</td>
+    <td>{{ item.x | float | round(0) | int }}, {{ item.y | float | round(0) | int }}</td>
+    <td>{{ (item.height_cm | int ~ " cm") if item.height_cm is not none else "sol" }}</td>
+    <td>{{ date(item.created_at) }}</td>
+    <td>{{ "en cours" if item.closed_at is none else "close" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Aucun emplacement.</td></tr>
+  {% endfor %}
+</table>
+
+<p>Une correction de marqueur ne crée pas de ligne : seul un déplacement réel
+   clôt la période en cours et en ouvre une nouvelle.</p>
+
+<p>Les dates affichées sont celles du monde réel. Elles ne se confondent pas avec
+   la date de saisie : une période vécue en 2021 peut avoir été enregistrée aujourd'hui.</p>
+{% endblock %}

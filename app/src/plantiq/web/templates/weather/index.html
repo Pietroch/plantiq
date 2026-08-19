@@ -1,0 +1,60 @@
+<!-- app/src/plantiq/web/templates/weather/index.html -->
+
+{% extends "base.html" %}
+
+{% block title %}Météo{% endblock %}
+
+{% block content %}
+<h1>Relevés météo</h1>
+
+<p>Ces lignes sont écrites une fois par jour par la tâche automatique, en lecture seule.
+   Il n'y a rien à saisir ni à corriger ici.</p>
+
+{% if sites | length > 1 %}
+<form method="get" action="{{ url_for('weather.index') }}">
+  <p>
+    <label>Site
+      <select name="site_id">
+        <option value="">Tous</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}"{{ " selected" if selected_site == site.id }}>
+          {{ site.name }}{% if site.city %} — {{ site.city }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Filtrer</button>
+  </p>
+</form>
+{% endif %}
+
+{% if readings %}
+<table border="1">
+  <tr>
+    <th>date</th><th>site</th><th>température</th><th>humidité</th>
+    <th>nuages</th><th>condition</th><th>relevé à</th><th>enregistré à</th><th>fuseau</th>
+  </tr>
+  {% for reading in readings %}
+  <tr>
+    <td>{{ reading.observed_on.strftime("%d/%m/%Y") }}</td>
+    <td>{{ reading.city or reading.site_name }}</td>
+    <td>{{ (reading.temp_c | float | round(1) ~ " °C") if reading.temp_c is not none else "—" }}</td>
+    <td>{{ (reading.humidity_pct | float | round(0) | int ~ " %") if reading.humidity_pct is not none else "—" }}</td>
+    <td>{{ (reading.cloud_pct ~ " %") if reading.cloud_pct is not none else "—" }}</td>
+    <td>{{ reading.condition_label }}</td>
+    <td>{{ reading.observed_at_local.strftime("%H:%M") }}</td>
+    <td>{{ reading.fetched_at_local.strftime("%d/%m %H:%M") }}</td>
+    <td>{{ reading.timezone }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p>Toutes les heures sont affichées dans le fuseau du site. La base, elle, stocke
+   des instants absolus : c'est ce qui permet de les rendre correctement quel que
+   soit le fuseau, et de passer l'heure d'été sans décalage.</p>
+
+<p>La date suit le même fuseau — une mesure de 22 h 30 UTC en été appartient au
+   jour suivant à Bruxelles.</p>
+{% else %}
+<p>Aucun relevé. La tâche quotidienne n'a pas encore tourné, ou aucun site n'est enregistré.</p>
+{% endif %}
+{% endblock %}
