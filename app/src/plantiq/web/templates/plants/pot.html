@@ -19,18 +19,18 @@
   {% for item in pots %}
   <p>
     <label>
-      <input type="radio" name="equipment_id" value="{{ item.id }}"
-             {{ " checked" if plant.equipment_id == item.id }}>
+      <input type="radio" name="container_id" value="{{ item.id }}"
+             {{ " checked" if plant.container_id == item.id }}>
       {{ item.name }}
       {%- if item.volume_l %} — {{ item.volume_l | float | round(1) }} L{% endif %}
       {%- if item.material_label %} — {{ item.material_label }}{% endif %}
-      {%- if plant.equipment_id == item.id %} <strong>(actuel)</strong>{% endif %}
+      {%- if plant.container_id == item.id %} <strong>(actuel)</strong>{% endif %}
     </label>
   </p>
   {% endfor %}
   <p>
     <label>Mis en place le <input type="date" name="potted_on"
-           value="{{ plant.attached_on if plant.attached_on else '' }}"></label>
+           value="{{ plant.valid_from if plant.valid_from else '' }}"></label>
   </p>
   <p>Changer clôt la période en cours et en ouvre une nouvelle.</p>
   <p><button type="submit">Enregistrer</button></p>

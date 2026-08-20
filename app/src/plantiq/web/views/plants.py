@@ -13,7 +13,7 @@ from plantiq.web.views.care import (
     health_history,
     timeline,
 )
-from plantiq.web.views.equipment import TYPES as EQUIPMENT_LABELS
+from plantiq.web.views.equipment import CONTAINER_TYPES
 from plantiq.web.views.species import EXPOSURES, MONTHS, SEASONS, SUN_TOLERANCES
 
 bp = Blueprint("plants", __name__, url_prefix="/plants")
@@ -80,18 +80,18 @@ def _load_plants() -> list[dict]:
         """
         SELECT p.id, p.name, p.purchased_on, p.price_eur, p.retailer,
                sp.scientific_name,
-               pl.id AS placement_id, pl.x, pl.y, pl.height_cm, pl.created_at AS placed_at,
+               pl.id AS placement_id, pl.x, pl.y, pl.elevation_cm, pl.created_at AS placed_at,
                r.name AS room_name, s.name AS site_name,
-               eq.name AS pot_name, eq.volume_l AS pot_volume_l, po.attached_on
+               eq.name AS pot_name, eq.volume_l AS pot_volume_l, po.valid_from
         FROM plant p
         JOIN species sp ON sp.id = p.species_id
         JOIN plant_placement pl ON pl.plant_id = p.id AND pl.closed_at IS NULL
         JOIN room_version v ON v.id = pl.room_version_id
         JOIN room r ON r.id = v.room_id
         JOIN site s ON s.id = r.site_id
-        LEFT JOIN plant_equipment po ON po.plant_id = p.id
-               AND po.equipment_type = 'pot' AND po.closed_at IS NULL
-        LEFT JOIN equipment eq ON eq.id = po.equipment_id
+        LEFT JOIN plant_container po ON po.plant_id = p.id
+               AND po.container_type = 'pot' AND po.closed_at IS NULL
+        LEFT JOIN container eq ON eq.id = po.container_id
         WHERE p.closed_at IS NULL
         ORDER BY p.id
         """,
@@ -102,7 +102,7 @@ def _load_plants() -> list[dict]:
 def _placement(plant_id: int) -> dict | None:
     return query(
         """
-        SELECT pl.id, pl.x, pl.y, pl.height_cm, pl.room_version_id,
+        SELECT pl.id, pl.x, pl.y, pl.elevation_cm, pl.room_version_id,
                p.name AS plant_name, r.name AS room_name,
                v.scale_wall_index, v.scale_cm
         FROM plant_placement pl
@@ -130,14 +130,15 @@ def _marker(payload: dict, vertices: list[dict]) -> tuple[dict | None, str | Non
     return {"x": pulled[0], "y": pulled[1]}, None
 
 
-def _height(payload: dict) -> tuple[float | None, str | None]:
-    raw = payload.get("height_cm")
+def _elevation(payload: dict) -> tuple[float | None, str | None]:
+    """How high the support stands, not how tall the plant is."""
+    raw = payload.get("elevation_cm")
     if raw in (None, ""):
         return None, None
     try:
         value = float(raw)
     except (TypeError, ValueError):
-        return None, "Hauteur non numérique."
+        return None, "Hauteur du support non numérique."
     return (value, None) if value >= 0 else (None, "La hauteur ne peut pas être négative.")
 
 
@@ -152,23 +153,23 @@ def _price(payload: dict) -> tuple[float | None, str | None]:
     return (value, None) if value >= 0 else (None, "Le prix ne peut pas être négatif.")
 
 
-# --- attached equipment
+# --- attached containers
 
 
 def _available(plant_id: int | None, kind: str) -> list[dict]:
-    """Items of that kind which are free, plus the one this plant already uses."""
+    """Containers of that kind which are free, plus the one this plant uses."""
     return query(
         """
-        SELECT e.id, e.name, e.volume_l, m.label AS material_label
-        FROM equipment e
-        LEFT JOIN material m ON m.id = e.material_id
-        WHERE e.type = %s AND e.closed_at IS NULL
+        SELECT c.id, c.name, c.volume_l, m.label AS material_label
+        FROM container c
+        LEFT JOIN material m ON m.id = c.material_id
+        WHERE c.type = %s AND c.closed_at IS NULL
           AND NOT EXISTS (
-              SELECT 1 FROM plant_equipment p
-              WHERE p.equipment_id = e.id AND p.closed_at IS NULL
+              SELECT 1 FROM plant_container p
+              WHERE p.container_id = c.id AND p.closed_at IS NULL
                 AND p.plant_id IS DISTINCT FROM %s
           )
-        ORDER BY e.name
+        ORDER BY c.name
         """,
         (kind, plant_id),
         fetch="all",
@@ -213,7 +214,7 @@ def create():
     marker, problem = _marker(payload, geometry["vertices"])
     if problem:
         return jsonify(error=problem), 400
-    height, problem = _height(payload)
+    elevation, problem = _elevation(payload)
     if problem:
         return jsonify(error=problem), 400
     price, problem = _price(payload)
@@ -236,9 +237,9 @@ def create():
             )
             plant_id = cur.fetchone()["id"]
             cur.execute(
-                "INSERT INTO plant_placement (plant_id, room_version_id, x, y, height_cm) "
+                "INSERT INTO plant_placement (plant_id, room_version_id, x, y, elevation_cm) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (plant_id, version_id, marker["x"], marker["y"], height),
+                (plant_id, version_id, marker["x"], marker["y"], elevation),
             )
     return jsonify(id=plant_id, redirect=url_for("plants.index"))
 
@@ -287,16 +288,16 @@ def detail(plant_id: int):
     )
     pottings = query(
         """
-        SELECT po.*, e.name AS equipment_name, e.type, e.volume_l, e.is_nursery_pot,
+        SELECT po.*, e.name AS container_name, e.type, e.volume_l, e.is_nursery_pot,
                e.outer_top_diameter_cm, e.outer_bottom_diameter_cm, e.outer_height_cm,
-               po.equipment_type, e.has_drainage,
-               e.purchased_on AS equipment_purchased_on, e.price_eur AS equipment_price_eur,
-               e.retailer AS equipment_retailer, m.label AS material_label, m.is_porous
-        FROM plant_equipment po
-        JOIN equipment e ON e.id = po.equipment_id
+               po.container_type, e.has_drainage,
+               e.purchased_on AS container_purchased_on, e.price_eur AS container_price_eur,
+               e.retailer AS container_retailer, m.label AS material_label, m.is_porous
+        FROM plant_container po
+        JOIN container e ON e.id = po.container_id
         LEFT JOIN material m ON m.id = e.material_id
         WHERE po.plant_id = %s
-        ORDER BY po.attached_on DESC NULLS LAST, po.id DESC
+        ORDER BY po.valid_from DESC NULLS LAST, po.id DESC
         """,
         (plant_id,),
         fetch="all",
@@ -304,10 +305,10 @@ def detail(plant_id: int):
 
     current = next((p for p in placements if p["closed_at"] is None), None)
     current_pot = next(
-        (p for p in pottings if p["closed_at"] is None and p["equipment_type"] == "pot"), None
+        (p for p in pottings if p["closed_at"] is None and p["container_type"] == "pot"), None
     )
     current_cachepot = next(
-        (p for p in pottings if p["closed_at"] is None and p["equipment_type"] == "cachepot"),
+        (p for p in pottings if p["closed_at"] is None and p["container_type"] == "cachepot"),
         None,
     )
 
@@ -334,7 +335,7 @@ def detail(plant_id: int):
         current_placement=current,
         current_potting=current_pot,
         current_cachepot=current_cachepot,
-        labels=EQUIPMENT_LABELS,
+        labels=CONTAINER_TYPES,
         entries=timeline(plant_id, kind),
         health=health_history(plant_id),
         health_statuses=HEALTH_STATUSES,
@@ -371,7 +372,7 @@ def save_move(plant_id: int):
     marker, problem = _marker(payload, geometry["vertices"])
     if problem:
         return jsonify(error=problem), 400
-    height, problem = _height(payload)
+    elevation, problem = _elevation(payload)
     if problem:
         return jsonify(error=problem), 400
 
@@ -383,14 +384,14 @@ def save_move(plant_id: int):
                     "UPDATE plant_placement SET closed_at = now() WHERE id = %s", (placement["id"],)
                 )
                 cur.execute(
-                    "INSERT INTO plant_placement (plant_id, room_version_id, x, y, height_cm) "
+                    "INSERT INTO plant_placement (plant_id, room_version_id, x, y, elevation_cm) "
                     "VALUES (%s, %s, %s, %s, %s)",
-                    (plant_id, placement["room_version_id"], marker["x"], marker["y"], height),
+                    (plant_id, placement["room_version_id"], marker["x"], marker["y"], elevation),
                 )
     elif payload.get("reason") == "correction":
         query(
-            "UPDATE plant_placement SET x = %s, y = %s, height_cm = %s WHERE id = %s",
-            (marker["x"], marker["y"], height, placement["id"]),
+            "UPDATE plant_placement SET x = %s, y = %s, elevation_cm = %s WHERE id = %s",
+            (marker["x"], marker["y"], elevation, placement["id"]),
         )
     else:
         return jsonify(error="Préciser s'il s'agit d'une correction ou d'un déplacement."), 400
@@ -402,9 +403,9 @@ def save_move(plant_id: int):
 def pot(plant_id: int):
     kind = request.args.get("kind", "pot")
     plant = query(
-        "SELECT p.id, p.name, po.equipment_id, po.attached_on "
-        "FROM plant p LEFT JOIN plant_equipment po ON po.plant_id = p.id "
-        "     AND po.equipment_type = %s AND po.closed_at IS NULL "
+        "SELECT p.id, p.name, po.container_id, po.valid_from "
+        "FROM plant p LEFT JOIN plant_container po ON po.plant_id = p.id "
+        "     AND po.container_type = %s AND po.closed_at IS NULL "
         "WHERE p.id = %s AND p.closed_at IS NULL",
         (kind, plant_id),
         fetch="one",
@@ -416,7 +417,7 @@ def pot(plant_id: int):
         plant=plant,
         pots=_available(plant_id, kind),
         kind=kind,
-        labels=EQUIPMENT_LABELS,
+        labels=CONTAINER_TYPES,
         error=request.args.get("error"),
     )
 
@@ -424,8 +425,8 @@ def pot(plant_id: int):
 @bp.route("/<int:plant_id>/pot", methods=["POST"])
 def save_pot(plant_id: int):
     kind = (request.form.get("kind") or "pot").strip()
-    equipment_id = (request.form.get("equipment_id") or "").strip()
-    if not equipment_id:
+    container_id = (request.form.get("container_id") or "").strip()
+    if not container_id:
         return redirect(
             url_for("plants.pot", plant_id=plant_id, kind=kind, error="Choisir un élément.")
         )
@@ -436,16 +437,28 @@ def save_pot(plant_id: int):
         with conn.cursor() as cur:
             potted_on = (request.form.get("potted_on") or "").strip() or None
             cur.execute(
-                "UPDATE plant_equipment SET closed_at = now(), detached_on = %s "
-                "WHERE plant_id = %s AND equipment_type = %s AND closed_at IS NULL",
+                "UPDATE plant_container SET closed_at = now(), valid_to = %s "
+                "WHERE plant_id = %s AND container_type = %s AND closed_at IS NULL",
                 (potted_on, plant_id, kind),
             )
+            # The type is read off the container, never copied from the form
             cur.execute(
-                "INSERT INTO plant_equipment "
-                "(plant_id, equipment_id, equipment_type, attached_on) "
-                "SELECT %s, %s, e.type, %s FROM equipment e WHERE e.id = %s",
-                (plant_id, int(equipment_id), potted_on, int(equipment_id)),
+                "INSERT INTO plant_container "
+                "(plant_id, container_id, container_type, valid_from) "
+                "SELECT %s, %s, c.type, %s FROM container c WHERE c.id = %s",
+                (plant_id, int(container_id), potted_on, int(container_id)),
             )
+            # Repotting is carried out here, not in care_log, which a CHECK
+            # forbids. So the act itself closes an open repotting reminder:
+            # otherwise the task would stay pending after being done, and
+            # care_log_id can never point anywhere for this action.
+            # A cachepot change is not a repotting.
+            if kind == "pot":
+                cur.execute(
+                    "UPDATE reminder SET completed_at = now() "
+                    "WHERE plant_id = %s AND action = 'repotting' AND completed_at IS NULL",
+                    (plant_id,),
+                )
     return redirect(url_for("plants.index"))
 
 
@@ -460,7 +473,7 @@ def close(plant_id: int):
             )
             # Closing a plant frees the pot it occupied
             cur.execute(
-                "UPDATE plant_equipment SET closed_at = now() "
+                "UPDATE plant_container SET closed_at = now() "
                 "WHERE plant_id = %s AND closed_at IS NULL",
                 (plant_id,),
             )

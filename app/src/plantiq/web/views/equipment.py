@@ -6,74 +6,130 @@ from plantiq.core.database import query
 
 bp = Blueprint("equipment", __name__, url_prefix="/equipment")
 
-TYPES = {
-    "pot": "Pot",
-    "cachepot": "Cache-pot",
-    "saucer": "Soucoupe",
-    "stake": "Tuteur",
-    "grow_light": "Lampe horticole",
-    "humidifier": "Humidificateur",
-    "substrate": "Substrat",
-    "fertilizer": "Engrais",
-    "tool": "Outil",
-    "other": "Autre",
+CONTAINER_TYPES = {"pot": "Pot", "cachepot": "Cache-pot"}
+CONSUMABLE_TYPES = {"substrate": "Substrat", "fertilizer": "Engrais"}
+
+# Bought once, recorded the same way everywhere
+PURCHASE = {"purchased_on": "date", "price_eur": "float", "retailer": "text"}
+
+# Business labels, defined once: the table headers and the form both read them,
+# so a column never shows up as its SQL name in the interface.
+FIELD_LABELS = {
+    "type": "Type",
+    "name": "Nom",
+    "volume_l": "Volume",
+    "material_id": "Matière",
+    "outer_top_diameter_cm": "Diamètre haut",
+    "outer_bottom_diameter_cm": "Diamètre bas",
+    "outer_height_cm": "Hauteur",
+    "is_nursery_pot": "Pot de culture",
+    "has_drainage": "Drainage",
+    "npk": "NPK",
+    "dilution_ml_per_l": "Dilution",
+    "purchased_on": "Acheté le",
+    "price_eur": "Prix",
+    "retailer": "Vendeur",
 }
 
-FIELDS = [
-    "type", "name", "volume_l", "material_id",
-    "outer_top_diameter_cm", "outer_bottom_diameter_cm", "outer_height_cm",
-    "is_nursery_pot", "has_drainage", "purchased_on", "price_eur", "retailer",
-]
-COLUMNS = "id, " + ", ".join(FIELDS)
+# Short units for the table headers; the form spells them out next to the input
+FIELD_UNITS = {
+    "volume_l": "L",
+    "outer_top_diameter_cm": "cm",
+    "outer_bottom_diameter_cm": "cm",
+    "outer_height_cm": "cm",
+    "dilution_ml_per_l": "ml/L",
+    "price_eur": "€",
+}
+
+# Three tables, three life cycles: a container is kept, a consumable is used
+# up, a tool belongs to no plant. Each entry drives the SELECT, the INSERT, the
+# UPDATE and the form — adding a column is a one-line change.
+TABLES = {
+    "container": {
+        "label": "Contenants",
+        "types": CONTAINER_TYPES,
+        # The litres a pot holds are the litres watering_ml_per_litre multiplies,
+        # which a bare "Volume" does not say
+        "labels": {"volume_l": "Volume de substrat"},
+        "fields": {
+            "type": "choice",
+            "name": "text",
+            "volume_l": "float",
+            "material_id": "material",
+            "outer_top_diameter_cm": "float",
+            "outer_bottom_diameter_cm": "float",
+            "outer_height_cm": "float",
+            "is_nursery_pot": "bool",
+            "has_drainage": "tri",
+            **PURCHASE,
+        },
+    },
+    "consumable": {
+        "label": "Consommables",
+        "types": CONSUMABLE_TYPES,
+        "fields": {
+            "type": "choice",
+            "name": "text",
+            "volume_l": "float",
+            "npk": "text",
+            "dilution_ml_per_l": "float",
+            **PURCHASE,
+        },
+    },
+    "tool": {
+        "label": "Outils",
+        "types": None,
+        "fields": {"name": "text", **PURCHASE},
+    },
+}
+
+POSITIVE = (
+    "volume_l",
+    "dilution_ml_per_l",
+    "outer_top_diameter_cm",
+    "outer_bottom_diameter_cm",
+    "outer_height_cm",
+)
 
 
-def _optional(name: str, cast) -> object | None:
+def _value(name: str, kind: str):
     raw = (request.form.get(name) or "").strip()
-    if not raw:
-        return None
-    try:
-        return cast(raw.replace(",", "."))
-    except ValueError:
-        return None
+    if kind == "bool":
+        return bool(request.form.get(name))
+    if kind == "tri":
+        # Yes, no, or unknown — a missing drainage value is not a missing hole
+        return None if raw in ("", "unknown") else raw == "yes"
+    if kind in ("float", "material"):
+        if not raw:
+            return None
+        try:
+            return float(raw.replace(",", ".")) if kind == "float" else int(raw)
+        except ValueError:
+            return None
+    return raw or None
 
 
-def _tri_state(name: str) -> bool | None:
-    """Yes, no, or unknown — drainage is meaningless on a lamp."""
-    raw = request.form.get(name)
-    return None if raw in (None, "", "unknown") else raw == "yes"
+def _read_form(spec: dict) -> tuple[dict, str | None]:
+    values = {name: _value(name, kind) for name, kind in spec["fields"].items()}
 
-
-def _read_form() -> tuple[dict, str | None]:
-    values = {
-        "type": request.form.get("type"),
-        "name": (request.form.get("name") or "").strip(),
-        "volume_l": _optional("volume_l", float),
-        "material_id": _optional("material_id", int),
-        "outer_top_diameter_cm": _optional("outer_top_diameter_cm", float),
-        "outer_bottom_diameter_cm": _optional("outer_bottom_diameter_cm", float),
-        "outer_height_cm": _optional("outer_height_cm", float),
-        "is_nursery_pot": bool(request.form.get("is_nursery_pot")),
-        "has_drainage": _tri_state("has_drainage"),
-        "purchased_on": (request.form.get("purchased_on") or "").strip() or None,
-        "price_eur": _optional("price_eur", float),
-        "retailer": (request.form.get("retailer") or "").strip() or None,
-    }
+    if spec["types"] and values["type"] not in spec["types"]:
+        return values, "Type inconnu."
+    if not values["name"]:
+        return values, "Le nom est obligatoire."
     # A nursery pot came with the plant: no separate purchase to record
-    if values["is_nursery_pot"]:
+    if values.get("is_nursery_pot"):
         values["purchased_on"] = values["price_eur"] = values["retailer"] = None
         if values["type"] != "pot":
             return values, "Un pot de culture est forcément de type Pot."
-    if values["type"] not in TYPES:
-        return values, "Type d'équipement inconnu."
-    if not values["name"]:
-        return values, "Le nom est obligatoire."
-    if values["volume_l"] is not None and values["volume_l"] <= 0:
-        return values, "Le volume doit être positif."
-    if values["price_eur"] is not None and values["price_eur"] < 0:
+    for name in POSITIVE:
+        if values.get(name) is not None and values[name] <= 0:
+            return values, "Les volumes et les dimensions doivent être positifs."
+    if values.get("price_eur") is not None and values["price_eur"] < 0:
         return values, "Le prix ne peut pas être négatif."
-    for field in ("outer_top_diameter_cm", "outer_bottom_diameter_cm", "outer_height_cm"):
-        if values[field] is not None and values[field] <= 0:
-            return values, "Les dimensions doivent être positives."
+    if values.get("type") != "fertilizer" and (
+        values.get("npk") or values.get("dilution_ml_per_l")
+    ):
+        return values, "Le NPK et la dilution ne concernent que les engrais."
     return values, None
 
 
@@ -81,88 +137,124 @@ def _materials() -> list[dict]:
     return query("SELECT id, label, is_porous FROM material ORDER BY label", fetch="all")
 
 
-def _render_list(error: str | None = None, item: dict | None = None):
-    rows = query(
-        f"""
-        SELECT {', '.join('e.' + f for f in FIELDS)}, e.id, e.closed_at,
-               m.label AS material_label,
-               p.plant_id, pl.name AS plant_name
-        FROM equipment e
-        LEFT JOIN material m  ON m.id = e.material_id
-        LEFT JOIN plant_equipment p ON p.equipment_id = e.id AND p.closed_at IS NULL
-        LEFT JOIN plant    pl ON pl.id = p.plant_id
-        WHERE e.closed_at IS NULL
-        ORDER BY e.type, e.name
-        """,
-        fetch="all",
-    )
-    return render_template(
-        "equipment/index.html",
-        equipment=rows,
-        materials=_materials(),
-        types=TYPES,
-        item=item,
-        error=error,
-    )
+def _rows(table: str) -> list[dict]:
+    if table == "container":
+        # Which plant holds it, so a free container is visible at a glance
+        return query(
+            """
+            SELECT c.*, m.label AS material_label, pl.name AS plant_name
+            FROM container c
+            LEFT JOIN material m ON m.id = c.material_id
+            LEFT JOIN plant_container pc ON pc.container_id = c.id AND pc.closed_at IS NULL
+            LEFT JOIN plant pl ON pl.id = pc.plant_id
+            WHERE c.closed_at IS NULL
+            ORDER BY c.type, c.name
+            """,
+            fetch="all",
+        )
+    return query(f"SELECT * FROM {table} WHERE closed_at IS NULL ORDER BY name", fetch="all")
+
+
+def _spec(table: str) -> dict | None:
+    # Table names come from TABLES only, never from the request path itself
+    return TABLES.get(table)
+
+
+def _labels() -> dict[str, dict[str, str]]:
+    """Header text per table and per field, unit included.
+
+    Resolved here rather than in the templates: the table and the form must
+    name a column the same way, and a per-table override stays possible.
+    """
+    resolved = {}
+    for table, spec in TABLES.items():
+        own = spec.get("labels", {})
+        resolved[table] = {
+            field: own.get(field) or FIELD_LABELS[field] for field in spec["fields"]
+        }
+    return resolved
 
 
 @bp.route("/")
 def index():
-    return _render_list(error=request.args.get("error"))
-
-
-@bp.route("/", methods=["POST"])
-def create():
-    values, problem = _read_form()
-    if problem:
-        return redirect(url_for("equipment.index", error=problem))
-    query(
-        f"INSERT INTO equipment ({', '.join(FIELDS)}) "
-        f"VALUES ({', '.join(['%s'] * len(FIELDS))})",
-        tuple(values[field] for field in FIELDS),
-    )
-    return redirect(url_for("equipment.index"))
-
-
-@bp.route("/<int:equipment_id>/edit")
-def edit(equipment_id: int):
-    item = query(
-        f"SELECT {COLUMNS} FROM equipment WHERE id = %s", (equipment_id,), fetch="one"
-    )
-    if item is None:
-        return "Équipement introuvable", 404
     return render_template(
-        "equipment/edit.html",
-        item=item,
+        "equipment/index.html",
+        tables=TABLES,
+        rows={table: _rows(table) for table in TABLES},
         materials=_materials(),
-        types=TYPES,
+        types={**CONTAINER_TYPES, **CONSUMABLE_TYPES},
+        labels=_labels(),
+        units=FIELD_UNITS,
         error=request.args.get("error"),
     )
 
 
-@bp.route("/<int:equipment_id>/edit", methods=["POST"])
-def update(equipment_id: int):
-    values, problem = _read_form()
+@bp.route("/<table>/", methods=["POST"])
+def create(table: str):
+    spec = _spec(table)
+    if spec is None:
+        return "Table inconnue", 404
+    values, problem = _read_form(spec)
     if problem:
-        return redirect(url_for("equipment.edit", equipment_id=equipment_id, error=problem))
-    assignments = ", ".join(f"{field} = %s" for field in FIELDS)
+        return redirect(url_for("equipment.index", error=problem))
+    columns = list(values)
     query(
-        f"UPDATE equipment SET {assignments} WHERE id = %s",
-        tuple(values[field] for field in FIELDS) + (equipment_id,),
+        f"INSERT INTO {table} ({', '.join(columns)}) "
+        f"VALUES ({', '.join(['%s'] * len(columns))})",
+        tuple(values.values()),
     )
     return redirect(url_for("equipment.index"))
 
 
-@bp.route("/<int:equipment_id>/close", methods=["POST"])
-def close(equipment_id: int):
-    # Closing an item detaches it from its plant: it holds nothing any more
-    query(
-        "UPDATE plant_equipment SET closed_at = now() "
-        "WHERE equipment_id = %s AND closed_at IS NULL",
-        (equipment_id,),
+@bp.route("/<table>/<int:item_id>/edit")
+def edit(table: str, item_id: int):
+    spec = _spec(table)
+    if spec is None:
+        return "Table inconnue", 404
+    item = query(f"SELECT * FROM {table} WHERE id = %s", (item_id,), fetch="one")
+    if item is None:
+        return "Élément introuvable", 404
+    return render_template(
+        "equipment/edit.html",
+        table=table,
+        spec=spec,
+        item=item,
+        materials=_materials(),
+        labels=_labels(),
+        units=FIELD_UNITS,
+        error=request.args.get("error"),
     )
+
+
+@bp.route("/<table>/<int:item_id>/edit", methods=["POST"])
+def update(table: str, item_id: int):
+    spec = _spec(table)
+    if spec is None:
+        return "Table inconnue", 404
+    values, problem = _read_form(spec)
+    if problem:
+        return redirect(url_for("equipment.edit", table=table, item_id=item_id, error=problem))
+    assignments = ", ".join(f"{column} = %s" for column in values)
     query(
-        "UPDATE equipment SET closed_at = now() WHERE id = %s AND closed_at IS NULL",
-        (equipment_id,),
+        f"UPDATE {table} SET {assignments} WHERE id = %s",
+        tuple(values.values()) + (item_id,),
+    )
+    return redirect(url_for("equipment.index"))
+
+
+@bp.route("/<table>/<int:item_id>/close", methods=["POST"])
+def close(table: str, item_id: int):
+    if _spec(table) is None:
+        return "Table inconnue", 404
+    if table == "container":
+        # Closing a container detaches it: it holds nothing any more
+        query(
+            "UPDATE plant_container SET closed_at = now() "
+            "WHERE container_id = %s AND closed_at IS NULL",
+            (item_id,),
+        )
+    query(
+        f"UPDATE {table} SET closed_at = now() WHERE id = %s AND closed_at IS NULL",
+        (item_id,),
     )
     return redirect(url_for("equipment.index"))

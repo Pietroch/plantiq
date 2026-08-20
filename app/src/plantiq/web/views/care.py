@@ -56,7 +56,7 @@ def timeline(plant_id: int, kind: str = "all") -> list[dict]:
             (plant_id,),
             fetch="all",
         ):
-            entries.append({**row, "kind": "done", "date": row["done_at"].date()})
+            entries.append({**row, "kind": "done", "date": row["done_at"]})
 
     if kind in ("all", "sent"):
         for row in query(
@@ -99,7 +99,7 @@ def complete(reminder_id: int):
             if reminder["action"] != "repotting":
                 cur.execute(
                     "INSERT INTO care_log (plant_id, action, done_at, volume_ml, notes) "
-                    "VALUES (%s, %s, COALESCE(%s::timestamptz, now()), %s, %s) RETURNING id",
+                    "VALUES (%s, %s, COALESCE(%s::date, CURRENT_DATE), %s, %s) RETURNING id",
                     (
                         reminder["plant_id"],
                         reminder["action"],
@@ -139,7 +139,7 @@ def add(plant_id: int):
     volume = (request.form.get("volume_ml") or "").strip() or None
     query(
         "INSERT INTO care_log (plant_id, action, done_at, volume_ml, notes) "
-        "VALUES (%s, %s, COALESCE(%s::timestamptz, now()), %s, %s)",
+        "VALUES (%s, %s, COALESCE(%s::date, CURRENT_DATE), %s, %s)",
         (
             plant_id,
             action,
@@ -159,7 +159,7 @@ def edit(care_id: int):
         return "Soin introuvable", 404
     volume = (request.form.get("volume_ml") or "").strip() or None
     query(
-        "UPDATE care_log SET action = %s, done_at = COALESCE(%s::timestamptz, done_at), "
+        "UPDATE care_log SET action = %s, done_at = COALESCE(%s::date, done_at), "
         "volume_ml = %s, notes = %s WHERE id = %s",
         (
             request.form.get("action"),

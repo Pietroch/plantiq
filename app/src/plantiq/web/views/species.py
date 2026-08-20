@@ -5,6 +5,7 @@ from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 
 from plantiq.core.database import connect, query
+from plantiq.engine.light import ExposureLevel
 
 bp = Blueprint("species", __name__, url_prefix="/species")
 
@@ -21,12 +22,9 @@ MONTHS = {
     7: "juillet", 8: "août", 9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre",
 }
 
-# Comparison order of the light_exposure enum, mirrored from the schema
-EXPOSURE_ORDER = list(EXPOSURES)
-
 COLUMNS = """
     id, scientific_name, common_name, watering_ml_per_litre,
-    exposure_min, exposure_max, sun_tolerance, temp_min_c, temp_max_c,
+    exposure_min, exposure_max, sun_tolerance, temp_min_c, temp_max_c, humidity_min_pct,
     fertilizing_interval_days, fertilizing_month_start, fertilizing_month_end,
     repotting_interval_months, repotting_month_start, repotting_month_end
 """
@@ -47,6 +45,7 @@ def _read_form() -> tuple[dict, dict[str, int], str | None]:
         "sun_tolerance": request.form.get("sun_tolerance"),
         "temp_min_c": _optional_int("temp_min_c"),
         "temp_max_c": _optional_int("temp_max_c"),
+        "humidity_min_pct": _optional_int("humidity_min_pct"),
         "fertilizing_interval_days": _optional_int("fertilizing_interval_days"),
         "fertilizing_month_start": _optional_int("fertilizing_month_start"),
         "fertilizing_month_end": _optional_int("fertilizing_month_end"),
@@ -60,7 +59,7 @@ def _read_form() -> tuple[dict, dict[str, int], str | None]:
         return values, intervals, "Le nom scientifique est obligatoire."
     if values["exposure_min"] not in EXPOSURES or values["exposure_max"] not in EXPOSURES:
         return values, intervals, "Exposition inconnue."
-    if EXPOSURE_ORDER.index(values["exposure_max"]) < EXPOSURE_ORDER.index(values["exposure_min"]):
+    if ExposureLevel[values["exposure_max"]] < ExposureLevel[values["exposure_min"]]:
         return values, intervals, "L'exposition maximale doit être au moins égale à la minimale."
     if values["sun_tolerance"] not in SUN_TOLERANCES:
         return values, intervals, "Tolérance au soleil inconnue."
@@ -70,6 +69,9 @@ def _read_form() -> tuple[dict, dict[str, int], str | None]:
         return values, intervals, "Les deux températures sont obligatoires."
     if values["temp_max_c"] <= values["temp_min_c"]:
         return values, intervals, "La température maximale doit dépasser la minimale."
+    humidity = values["humidity_min_pct"]
+    if humidity is not None and not 0 <= humidity <= 100:
+        return values, intervals, "L'humidité minimale doit être comprise entre 0 et 100 %."
 
     # The database cannot check this one: a species carries all four seasons
     missing = [SEASONS[s] for s, days in intervals.items() if not days or days <= 0]

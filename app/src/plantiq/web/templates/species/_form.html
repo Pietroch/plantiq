@@ -49,6 +49,14 @@
       <input type="number" name="temp_max_c" style="width:5em"
              value="{{ item.temp_max_c if item else 30 }}"> °C</label>
   </p>
+  <p>
+    <label>Humidité minimale
+      <input type="number" name="humidity_min_pct" min="0" max="100" style="width:5em"
+             value="{{ item.humidity_min_pct if item and item.humidity_min_pct is not none else '' }}"> %
+    </label>
+    <span>— seuil physiologique : en dessous, la plante brunit aux pointes. Sert d'alerte
+       seulement, jamais de paramètre d'arrosage.</span>
+  </p>
 
   <h3>Arrosage</h3>
   <p>

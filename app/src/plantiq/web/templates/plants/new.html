@@ -38,8 +38,8 @@
       {% endfor %}
     </select>
   </label>
-  <label>Hauteur depuis le sol
-    <input type="number" id="height_cm" min="0" step="1" style="width:6em" placeholder="vide = sol">
+  <label>Hauteur du support
+    <input type="number" id="elevation_cm" min="0" step="1" style="width:6em" placeholder="vide = sol">
     cm
   </label>
 </p>
@@ -151,7 +151,7 @@ document.getElementById("save").addEventListener("click", async () => {
       species_id: parseInt(document.getElementById("species_id").value, 10),
       name: document.getElementById("name").value,
       room_version_id: parseInt(roomSelect.value, 10),
-      height_cm: document.getElementById("height_cm").value,
+      elevation_cm: document.getElementById("elevation_cm").value,
       purchased_on: document.getElementById("purchased_on").value,
       price_eur: document.getElementById("price_eur").value,
       retailer: document.getElementById("retailer").value,

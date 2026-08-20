@@ -9,6 +9,11 @@
 
 <p>Une ligne par passage de la tâche quotidienne. En lecture seule.</p>
 
+{% set STATUS = {
+  "running": "en cours", "ok": "terminé",
+  "failed": "en échec", "aborted": "abandonné",
+} %}
+
 {% if runs %}
 <table border="1">
   <tr>
@@ -19,11 +24,10 @@
   <tr>
     <td>{{ run.started_at.strftime("%d/%m/%Y %H:%M") }}</td>
     <td>{{ ("%.1f" | format(run.seconds) ~ " s") if run.seconds is not none else "—" }}</td>
-    <td>
-      {%- if run.finished_at is none -%}interrompu
-      {%- elif run.error or run.send_failed or run.sites_failed -%}<strong>en échec</strong>
-      {%- else -%}terminé{%- endif -%}
-    </td>
+    {# Read off the row, never derived: a run that never reported back keeps
+       'running', which is itself the signal that it died mid-flight #}
+    <td>{% if run.status == "failed" %}<strong>{{ STATUS[run.status] }}</strong>
+        {%- else %}{{ STATUS[run.status] }}{% endif %}</td>
     <td>{{ run.sites_ok }}{% if run.sites_failed %} <strong>+{{ run.sites_failed }} en échec</strong>{% endif %}</td>
     <td>{{ run.readings }}</td>
     <td>{{ run.reminders_new }}{% if run.reminders != run.reminders_new %} ({{ run.reminders }} liés){% endif %}</td>

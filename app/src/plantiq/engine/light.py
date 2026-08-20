@@ -2,6 +2,7 @@
 
 import math
 from dataclasses import dataclass
+from enum import IntEnum
 
 from plantiq.engine.geometry import (
     Point,
@@ -24,16 +25,43 @@ AZIMUTH_WEIGHTS = {
 }
 CARDINALS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
 
+# north_angle convention, shared by the schema, this module and the editor:
+# degrees turning clockwise from the top of the drawing to true north, so 0
+# means north is up. The top of the plan therefore heads (360 - north_angle),
+# which is what rooms/editor.html reads out. Nothing stores the convention —
+# test_light.py pins it on the real geometry of the Séjour instead.
+NORTH_ANGLE_UP_IS_ZERO = 0.0
+
 # Reference opening: a three-metre window scores its full azimuth weight.
 # A narrow one lets in proportionally less, a bay window more.
 REFERENCE_WIDTH_M = 3.0
 
-# Light falls off fast with distance, normalised to 1 at one metre
-EXPOSURE_LEVELS = [(1.5, "direct"), (0.6, "bright_indirect"), (0.2, "indirect")]
+# An overcast sky dims the same window: a fully covered one keeps 40 % of what
+# a clear one delivers. The sky modulates the light, never the water directly —
+# which is why this multiplies the intensity instead of adding a factor.
+CLOUD_ATTENUATION = 0.6
 
-# Comparison order of the light_exposure enum, mirrored from the schema. This module
-# owns the scale; comparing a measurement to what a species tolerates is rules' job.
-LEVEL_ORDER = ["low", "indirect", "bright_indirect", "direct"]
+
+class ExposureLevel(IntEnum):
+    """Light levels, ranked. The rank mirrors the declaration order of the
+    light_exposure enum in the schema, and it is what turns "is the measured
+    level between the species' minimum and maximum" into a comparison.
+
+    Sole owner of the ordering: engine and web both read it from here.
+    """
+
+    low = 1
+    indirect = 2
+    bright_indirect = 3
+    direct = 4
+
+
+# Light falls off fast with distance, normalised to 1 at one metre
+EXPOSURE_LEVELS = [
+    (1.5, ExposureLevel.direct),
+    (0.6, ExposureLevel.bright_indirect),
+    (0.2, ExposureLevel.indirect),
+]
 
 
 @dataclass
@@ -57,6 +85,10 @@ def wall_azimuth(vertices: list[Point], wall_index: int, north_angle: float) -> 
 
     The outward side is found by stepping off the wall and testing the polygon,
     which works whatever the winding order of the vertices.
+
+    north_angle follows the convention above: clockwise from the top of the
+    drawing to true north. With north at 276°, a wall facing up the plan reads
+    84°, that is east.
     """
     a, b = walls(vertices)[wall_index]
     middle = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
@@ -163,27 +195,42 @@ def exposure(
     """
     window = nearest_of_type(point, vertices, elements, "window", units_per_cm, north_angle)
     if window is None or window["distance_m"] is None:
-        return Exposure(intensity=0.0, level="low")
+        return Exposure(intensity=0.0, level=ExposureLevel.low.name)
 
     weight = AZIMUTH_WEIGHTS[window["cardinal"]]
     # A wide opening gathers more sky than a narrow one at the same distance
     width_ratio = (window["width_m"] or REFERENCE_WIDTH_M) / REFERENCE_WIDTH_M
     intensity = weight * 4 * width_ratio / (1 + window["distance_m"]) ** 2
 
-    level = "low"
-    for threshold, name in EXPOSURE_LEVELS:
+    level = ExposureLevel.low
+    for threshold, candidate in EXPOSURE_LEVELS:
         if intensity >= threshold:
-            level = name
+            level = candidate
             break
 
     return Exposure(
         intensity=intensity,
-        level=level,
+        # The name, not the rank: it is what the schema stores and the payload carries
+        level=level.name,
         distance_m=window["distance_m"],
         width_m=window["width_m"],
         cardinal=window["cardinal"],
         visible=True,
     )
+
+
+def attenuated_intensity(intensity: float, cloud_pct: float | None) -> float:
+    """Geometric intensity dimmed by today's sky.
+
+    Deliberately kept out of Exposure.level: the level is compared to what the
+    species tolerates, which is a property of the spot, not of the weather. An
+    attenuated level would make that alert flicker with every cloudy day.
+
+    Unknown cloud cover changes nothing, like every other missing input here.
+    """
+    if cloud_pct is None:
+        return intensity
+    return intensity * (1 - CLOUD_ATTENUATION * float(cloud_pct) / 100)
 
 
 def position_in_room(point: Point, vertices: list[Point], units_per_cm: float | None) -> str:

@@ -1,25 +1,27 @@
 <!-- app/src/plantiq/web/templates/equipment/_form.html -->
 
-{# Shared by creation and edition: item is None when creating #}
+{# Driven by spec.fields: the same form serves the three tables, creation and
+   edition. item is None when creating. #}
 
-<form method="post" action="{{ action }}">
-  <p>
-    <label>Type
+{# Labels come from views/equipment.py, shared with the table headers. Only the
+   spelled-out units are local: a header says "(L)", a field says "litres". #}
+{% set UNITS = {
+  "volume_l": " litres", "dilution_ml_per_l": " ml par litre d'eau",
+  "outer_top_diameter_cm": " cm", "outer_bottom_diameter_cm": " cm", "outer_height_cm": " cm",
+} %}
+
+<form method="post" action="{{ action }}" id="form_{{ table }}">
+  {% for field, kind in spec.fields.items() %}
+    {% if kind == "choice" %}
+  <p><label>{{ labels[table][field] }}
       <select name="type">
-        {% for key, label in types.items() %}
-        <option value="{{ key }}"{{ " selected" if key == (item.type if item else "pot") }}>{{ label }}</option>
+        {% for key, label in spec.types.items() %}
+        <option value="{{ key }}"{{ " selected" if key == (item.type if item else None) }}>{{ label }}</option>
         {% endfor %}
       </select>
-    </label>
-    <label>Nom <input type="text" name="name" required
-           value="{{ item.name if item else '' }}" placeholder="Pot terre cuite 20 cm"></label>
-  </p>
-  <p>
-    <label>Volume de substrat
-      <input type="number" name="volume_l" min="0" step="0.1" style="width:6em"
-             value="{{ item.volume_l if item and item.volume_l else '' }}"> litres</label>
-    <span>— calculé depuis les dimensions, modifiable</span>
-    <label>Matière
+    </label></p>
+    {% elif kind == "material" %}
+  <p><label>{{ labels[table][field] }}
       <select name="material_id">
         <option value="">—</option>
         {% for material in materials %}
@@ -27,84 +29,81 @@
           {{ material.label }}{{ " (poreux)" if material.is_porous }}</option>
         {% endfor %}
       </select>
-    </label>
-  </p>
-  <p>Dimensions extérieures — ce qu'un cache-pot doit pouvoir avaler.</p>
-  <p>
-    <label>Diamètre haut
-      <input type="number" name="outer_top_diameter_cm" min="0" step="0.1" style="width:6em"
-             value="{{ item.outer_top_diameter_cm if item and item.outer_top_diameter_cm else '' }}"> cm</label>
-    <label>Diamètre bas
-      <input type="number" name="outer_bottom_diameter_cm" min="0" step="0.1" style="width:6em"
-             value="{{ item.outer_bottom_diameter_cm if item and item.outer_bottom_diameter_cm else '' }}"> cm</label>
-    <label>Hauteur
-      <input type="number" name="outer_height_cm" min="0" step="0.1" style="width:6em"
-             value="{{ item.outer_height_cm if item and item.outer_height_cm else '' }}"> cm</label>
-  </p>
-  <p>
-    <label>Drainage
+    </label></p>
+    {% elif kind == "tri" %}
+  <p><label>{{ labels[table][field] }}
       <select name="has_drainage">
         <option value="unknown"{{ " selected" if item and item.has_drainage is none }}>Non renseigné</option>
         <option value="yes"{{ " selected" if item and item.has_drainage }}>Percé</option>
         <option value="no"{{ " selected" if item and item.has_drainage is not none and not item.has_drainage }}>Sans trou</option>
       </select>
-    </label>
-  </p>
-
-  <p>
-    <label><input type="checkbox" name="is_nursery_pot" value="1"
-           {{ " checked" if item and item.is_nursery_pot }}>
-      Pot de culture — celui dans lequel la plante est arrivée de la jardinerie</label>
-  </p>
-
-  <div id="purchase">
-  <p>
-    <label>Acheté le <input type="date" name="purchased_on"
-           value="{{ item.purchased_on if item and item.purchased_on else '' }}"></label>
-    <label>Prix <input type="number" name="price_eur" min="0" step="0.01" style="width:6em"
-           value="{{ item.price_eur if item and item.price_eur is not none else '' }}"> €</label>
-    <label>Vendeur <input type="text" name="retailer"
-           value="{{ item.retailer if item and item.retailer else '' }}"></label>
-  </p>
-  </div>
+    </label></p>
+    {% elif kind == "bool" %}
+  <p><label><input type="checkbox" name="{{ field }}" value="1"{{ " checked" if item and item[field] }}>
+      {{ labels[table][field] }} — celui dans lequel la plante est arrivée de la jardinerie</label></p>
+    {% elif field in ("purchased_on", "price_eur", "retailer") %}
+      {% if field == "purchased_on" %}<div id="purchase_{{ table }}"><p>{% endif %}
+    <label>{{ labels[table][field] }}
+      <input type="{{ "date" if field == "purchased_on" else ("number" if field == "price_eur" else "text") }}"
+             name="{{ field }}"{{ ' min="0" step="0.01" style="width:6em"' | safe if field == "price_eur" }}
+             value="{{ item[field] if item and item[field] is not none else '' }}">
+      {{- " €" if field == "price_eur" }}</label>
+      {% if field == "retailer" %}</p></div>{% endif %}
+    {% else %}
+  <p><label>{{ labels[table][field] }}
+      <input type="{{ "number" if kind == "float" else "text" }}"
+             name="{{ field }}"{{ ' min="0" step="0.1" style="width:7em"' | safe if kind == "float" }}
+             value="{{ item[field] if item and item[field] is not none else '' }}"
+             {{- ' placeholder="7-3-6"' | safe if field == "npk" }}
+             {{- ' required' | safe if field == "name" }}>
+      {{- UNITS.get(field, "") }}</label></p>
+    {% endif %}
+  {% endfor %}
 
   <p><button type="submit">{{ submit_label }}</button></p>
 </form>
 
 <script>
-// A pot is a truncated cone. Outer dimensions overshoot the substrate — walls,
-// base and the few centimetres left under the rim for watering — hence the fill factor.
-const FILL_FACTOR = 0.80;
+// Scoped to this form: the index page carries all three at once
+(function () {
+  const form = document.getElementById("form_{{ table }}");
+  const field = name => form.querySelector(`[name="${name}"]`);
 
-const field = name => document.querySelector(`[name="${name}"]`);
-const volume = field("volume_l");
-let manual = false;
+  // A pot is a truncated cone. Outer dimensions overshoot the substrate — walls,
+  // base and the centimetres left under the rim for watering — hence the fill factor.
+  const FILL_FACTOR = 0.80;
+  const volume = field("volume_l");
+  const top = field("outer_top_diameter_cm");
+  let manual = false;
 
-volume.addEventListener("input", () => { manual = true; });
-
-function computeVolume() {
-  if (manual) return;
-  const top = parseFloat(field("outer_top_diameter_cm").value);
-  const bottom = parseFloat(field("outer_bottom_diameter_cm").value) || top;
-  const height = parseFloat(field("outer_height_cm").value);
-  if (!top || !height) return;
-  const R = top / 2, r = bottom / 2;
-  const cm3 = (Math.PI * height / 3) * (R * R + R * r + r * r);
-  volume.value = (cm3 * FILL_FACTOR / 1000).toFixed(1);
-}
-
-for (const name of ["outer_top_diameter_cm", "outer_bottom_diameter_cm", "outer_height_cm"]) {
-  field(name).addEventListener("input", computeVolume);
-}
-
-const nursery = field("is_nursery_pot");
-function togglePurchase() {
-  const hidden = nursery.checked;
-  document.getElementById("purchase").style.display = hidden ? "none" : "";
-  if (hidden) {
-    for (const name of ["purchased_on", "price_eur", "retailer"]) field(name).value = "";
+  if (volume && top) {
+    volume.addEventListener("input", () => { manual = true; });
+    const compute = () => {
+      if (manual) return;
+      const diameter = parseFloat(top.value);
+      const bottom = parseFloat(field("outer_bottom_diameter_cm").value) || diameter;
+      const height = parseFloat(field("outer_height_cm").value);
+      if (!diameter || !height) return;
+      const R = diameter / 2, r = bottom / 2;
+      const cm3 = (Math.PI * height / 3) * (R * R + R * r + r * r);
+      volume.value = (cm3 * FILL_FACTOR / 1000).toFixed(1);
+    };
+    for (const name of ["outer_top_diameter_cm", "outer_bottom_diameter_cm", "outer_height_cm"]) {
+      field(name).addEventListener("input", compute);
+    }
   }
-}
-nursery.addEventListener("change", togglePurchase);
-togglePurchase();
+
+  const nursery = field("is_nursery_pot");
+  const purchase = document.getElementById("purchase_{{ table }}");
+  if (nursery && purchase) {
+    const toggle = () => {
+      purchase.style.display = nursery.checked ? "none" : "";
+      if (nursery.checked) {
+        for (const name of ["purchased_on", "price_eur", "retailer"]) field(name).value = "";
+      }
+    };
+    nursery.addEventListener("change", toggle);
+    toggle();
+  }
+})();
 </script>

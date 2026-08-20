@@ -1,7 +1,6 @@
 # app/tests/test_rules.py
 
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 import pytest
 
@@ -13,9 +12,14 @@ from plantiq.engine.rules import (
     assess,
     blended_interval,
     exposure_alert,
+    factor_exposure,
+    factor_porous,
+    humidity_alert,
     in_month_window,
+    is_leaching_due,
     message,
     next_window_start,
+    placement_alerts,
     season_blend,
 )
 
@@ -44,8 +48,9 @@ def make_context(**overrides) -> Context:
     return ctx
 
 
-def care_on(day: date) -> datetime:
-    return datetime.combine(day, datetime.min.time(), tzinfo=ZoneInfo(ZONE))
+def care_on(day: date) -> date:
+    # care_log.done_at is a date: no hour is ever read off a care
+    return day
 
 
 # --- fertilizing blocked by a recent repotting
@@ -156,25 +161,31 @@ def test_planning_message_says_when_rather_than_what():
 
 
 def test_heating_collapses_the_relative_humidity():
-    # Winter air at 2 °C and 85 % holds little water; at 20 °C indoors it reads dry
-    indoor_c = indoor_temperature(2.0, 100, month=1)
-    assert indoor_c == pytest.approx(20.0)
-    assert indoor_humidity(2.0, 85.0, indoor_c) == pytest.approx(25.7, abs=0.5)
+    # Winter air at 5 °C and 90 % holds little water; indoors it reads dry
+    indoor_c = indoor_temperature(5.0)
+    assert indoor_c == pytest.approx(19.4)
+    assert indoor_humidity(5.0, 90.0, indoor_c) == pytest.approx(34.9, abs=0.5)
 
 
-def test_summer_room_follows_the_outside_and_stays_capped():
-    assert indoor_temperature(30.0, 5, month=7) == pytest.approx(27.2, abs=0.3)
-    assert indoor_temperature(38.0, 0, month=7) == 28.0
+@pytest.mark.parametrize(
+    ("outdoor_c", "indoor_c"),
+    [(35.0, 26.6), (10.0, 19.9), (20.7, 20.97), (21.0, 21.0)],
+)
+def test_the_room_follows_the_outside_asymmetrically(outdoor_c, indoor_c):
+    # Heat gets in at 0.4, cold is held off at 0.1 — the heating absorbs the swing
+    assert indoor_temperature(outdoor_c) == pytest.approx(indoor_c, abs=0.01)
 
 
-def test_a_cold_snap_never_drops_the_room_below_its_floor():
-    assert indoor_temperature(-5.0, 50, month=1) == 20.0
+def test_a_cold_snap_is_no_longer_flattened_by_a_floor():
+    # The old floor of 20 °C made a cold room unrepresentable, and any cold
+    # alert structurally silent with it
+    assert indoor_temperature(-5.0) == pytest.approx(18.4)
 
 
 def test_the_dew_point_survives_the_conversion():
     # The physical invariant: moving air indoors changes its temperature, not its water
     outdoor_c, outdoor_rh = 12.0, 88.0
-    indoor_c = indoor_temperature(outdoor_c, 80, month=11)
+    indoor_c = indoor_temperature(outdoor_c)
     indoor_rh = indoor_humidity(outdoor_c, outdoor_rh, indoor_c)
     assert dew_point(indoor_c, indoor_rh) == pytest.approx(dew_point(outdoor_c, outdoor_rh), abs=0.1)
 
@@ -186,6 +197,114 @@ def test_the_humidity_factor_is_capped_at_its_ceiling():
     assert factor_humidity(86.0) == pytest.approx(1.10)
     assert factor_humidity(82.3) == pytest.approx(1.089, abs=0.001)
     assert factor_humidity(25.7) == pytest.approx(0.90)
+
+
+# --- the porosity factor shortens, it never lengthens
+
+
+def test_terracotta_shortens_the_interval():
+    # The sign, pinned on the function rather than on a plant: plant 3 wears a
+    # cachepot, which cancels porosity by design, so it would read 1.00 and
+    # prove nothing about the sign
+    assert factor_porous(is_porous=True) < 1
+    assert factor_porous(is_porous=True) == pytest.approx(0.85)
+    assert factor_porous(is_porous=False) == 1.00
+    assert factor_porous(is_porous=None) == 1.00
+
+
+def test_a_cachepot_seals_the_porous_walls():
+    assert factor_porous(is_porous=True, has_cachepot=True) == 1.00
+
+
+# --- the sky dims the light, and only the light
+
+
+def test_an_overcast_sky_lengthens_the_interval():
+    clear = factor_exposure(seen("bright_indirect"), cloud_pct=0)
+    overcast = factor_exposure(seen("bright_indirect"), cloud_pct=100)
+    # Less light received means less evaporation, so a longer interval
+    assert overcast > clear
+    assert factor_exposure(seen("bright_indirect"), cloud_pct=None) == clear
+
+
+def test_the_sky_never_moves_the_placement_verdict():
+    # The species range judges the spot, not today's weather: an overcast day
+    # must not turn a well-placed plant into an under-lit one
+    exposure = seen("indirect")
+    assert exposure_alert(exposure, "indirect", "direct") is None
+    assert exposure.level == "indirect"
+
+
+def test_an_overdue_repotting_is_carried_out_in_the_window():
+    # due_on keeps the lateness, act_on says when to actually do it
+    ctx = make_context(last_potted_on=date(2021, 6, 26))
+    assert assess(ctx, "repotting").due_on == date(2024, 6, 10)
+    assert ctx.act_on() == date(2027, 3, 1)
+
+
+def test_inside_the_window_the_action_date_is_today():
+    ctx = make_context(today=date(2026, 3, 15), last_potted_on=date(2021, 6, 26))
+    assert ctx.act_on() == date(2026, 3, 15)
+
+
+# --- leaching, every fifth watering
+
+
+@pytest.mark.parametrize(
+    ("logged", "due"),
+    [(0, False), (3, False), (4, True), (5, False), (9, True)],
+)
+def test_every_fifth_watering_is_a_flush(logged, due):
+    assert is_leaching_due(logged) is due
+
+
+def test_the_flush_doubles_the_dose_and_says_so():
+    ctx = make_context(last_potted_on=None, volume_ml=726, watering_count=4)
+    _, body = message(ctx, "watering")
+    assert "1452 ml." in body
+    assert "Rinçage à l'évier" in body
+
+
+def test_an_ordinary_watering_keeps_its_dose():
+    ctx = make_context(last_potted_on=None, volume_ml=726, watering_count=3)
+    _, body = message(ctx, "watering")
+    assert "726 ml." in body
+    assert "Rinçage" not in body
+
+
+# --- placement: what the spot does, whatever the interval says
+
+
+def test_a_radiator_is_furniture_out_of_the_heating_season():
+    ctx = make_context(radiator_m=0.27, today=date(2026, 8, 20))
+    assert placement_alerts(ctx) == []
+
+
+def test_a_radiator_within_a_metre_alerts_during_the_heating_season():
+    ctx = make_context(radiator_m=0.27, today=date(2026, 10, 1))
+    assert "Radiateur à 27 cm" in placement_alerts(ctx)[0]
+
+
+def test_an_air_conditioner_alerts_in_summer():
+    ctx = make_context(air_conditioner_m=0.62, today=date(2026, 8, 20))
+    assert "Climatiseur à 62 cm" in placement_alerts(ctx)[0]
+
+
+def test_a_stressed_plant_lifts_the_month_windows():
+    # Something is already going wrong: the season is a poor reason to stay
+    # silent about a heat source 27 cm away
+    ctx = make_context(
+        radiator_m=0.27, today=date(2026, 8, 20), health={"status": "stressed"}
+    )
+    assert "Radiateur" in placement_alerts(ctx)[0]
+
+
+def test_direct_sun_on_a_filtered_species_alerts():
+    ctx = make_context(exposure=seen("direct"))
+    ctx.species["sun_tolerance"] = "filtered"
+    assert "Soleil direct" in placement_alerts(ctx)[0]
+    ctx.species["sun_tolerance"] = "full"
+    assert placement_alerts(ctx) == []
 
 
 # --- seasonal smoothing
@@ -290,3 +409,29 @@ def test_a_resting_or_failing_plant_is_not_fertilized(status):
 def test_a_stressed_plant_is_still_fertilized():
     ctx = make_context(last_potted_on=None, health={"status": "stressed"})
     assert assess(ctx, "fertilizing").is_due
+
+
+# --- experienced humidity against the species floor
+
+
+def test_dry_air_names_the_species_floor():
+    alert = humidity_alert(32.4, 50)
+    assert "32 %" in alert
+    assert "au moins 50 %" in alert
+
+
+def test_humidity_sitting_on_the_floor_is_not_a_violation():
+    assert humidity_alert(50.0, 50) is None
+
+
+def test_an_unknown_side_of_the_humidity_check_says_nothing():
+    assert humidity_alert(None, 50) is None
+    assert humidity_alert(32.4, None) is None
+
+
+def test_the_humidity_alert_rides_the_watering_message():
+    alert = "Air trop sec : 32 %, l'espèce demande au moins 50 %."
+    ctx = make_context(last_potted_on=None, volume_ml=495, humidity_alert=alert)
+    assert alert in message(ctx, "watering")[1]
+    # Fertilizing carries no alert: watering is the message that comes back often
+    assert alert not in message(ctx, "fertilizing")[1]

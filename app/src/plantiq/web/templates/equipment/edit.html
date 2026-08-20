@@ -2,7 +2,7 @@
 
 {% extends "base.html" %}
 
-{% block title %}Modifier un équipement{% endblock %}
+{% block title %}Modifier{% endblock %}
 
 {% block content %}
 <h1>{{ item.name }}</h1>
@@ -13,7 +13,8 @@
 <p><strong>Refusé : {{ error }}</strong></p>
 {% endif %}
 
-{% with action = url_for("equipment.update", equipment_id=item.id), submit_label = "Enregistrer" %}
+{% with action = url_for("equipment.update", table=table, item_id=item.id),
+        submit_label = "Enregistrer" %}
   {% include "equipment/_form.html" %}
 {% endwith %}
 {% endblock %}

@@ -5,11 +5,11 @@
 A plant inside a heated house does not live in the weather station's air.
 Two corrections matter, and the second is the one that bites in winter:
 
-  - temperature: the room barely follows the outside when heating is on,
-    and follows it loosely the rest of the year;
+  - temperature: the room sits near its setpoint and follows the outside
+    asymmetrically — heat gets in, cold is held off by the heating;
   - humidity: the *absolute* water content is roughly the same inside and
     outside, so warming that air collapses its relative humidity. Outside
-    at 5 °C and 85 %, the same air at 20 °C indoors sits near 32 %.
+    at 5 °C and 90 %, the same air at 19,4 °C indoors reads near 35 %.
 """
 
 import math
@@ -19,16 +19,13 @@ MAGNUS_A = 17.62
 MAGNUS_B = 243.12
 MAGNUS_C = 6.112
 
-# Heating target, and how much the room follows the outside
-SETPOINT_C = 20.5
-COUPLING_HEATED = 0.15
-COUPLING_FREE = 0.55
-
-# A clear sky warms a room through its windows
-SUN_BONUS_C = 1.5
-
-INDOOR_MIN_C, INDOOR_MAX_C = 20.0, 28.0
-HEATING_MONTHS = {10, 11, 12, 1, 2, 3, 4}
+# The room is held near this, and follows the outside asymmetrically: a hot day
+# pushes it up noticeably, a cold one barely moves it because the heating
+# absorbs the swing. The asymmetry replaces a calendar of heating months — what
+# decides is whether it is warmer outside than the setpoint, not the date.
+INDOOR_SETPOINT_C = 21.0
+COUPLING_ABOVE = 0.4
+COUPLING_BELOW = 0.1
 
 
 def saturation_pressure(temp_c: float) -> float:
@@ -42,19 +39,15 @@ def dew_point(temp_c: float, humidity_pct: float) -> float:
     return MAGNUS_B * ratio / (MAGNUS_A - ratio)
 
 
-def indoor_temperature(
-    outdoor_c: float, cloud_pct: float | None, month: int
-) -> float:
-    """Room temperature, blended between the heating setpoint and the outside."""
-    heated = month in HEATING_MONTHS
-    coupling = COUPLING_HEATED if heated else COUPLING_FREE
-    temperature = SETPOINT_C + coupling * (outdoor_c - SETPOINT_C)
+def indoor_temperature(outdoor_c: float) -> float:
+    """Room temperature, damped towards the setpoint.
 
-    # Solar gain only counts when the heating is not already holding the room
-    if not heated and cloud_pct is not None:
-        temperature += SUN_BONUS_C * (1 - cloud_pct / 100)
-
-    return min(INDOOR_MAX_C, max(INDOOR_MIN_C, temperature))
+    No clamp: the previous floor of 20 °C made a cold room unrepresentable,
+    which in turn made any cold alert structurally silent. 10 °C outside now
+    reads 19,9 °C indoors rather than exactly 20.
+    """
+    coupling = COUPLING_ABOVE if outdoor_c > INDOOR_SETPOINT_C else COUPLING_BELOW
+    return INDOOR_SETPOINT_C + coupling * (outdoor_c - INDOOR_SETPOINT_C)
 
 
 def indoor_humidity(outdoor_c: float, outdoor_humidity_pct: float, indoor_c: float) -> float:

@@ -17,8 +17,8 @@ CREATE TYPE light_exposure    AS ENUM ('low', 'indirect', 'bright_indirect', 'di
 CREATE TYPE sun_tolerance     AS ENUM ('none', 'filtered', 'full');
 
 -- One enum for both care_log and reminder. 'repotting' only ever appears in
--- reminder: the act itself lives in potting, which already carries the date,
--- the container and the history. A CHECK on care_log enforces it.
+-- reminder: the act itself lives in plant_container, which already carries the
+-- period, the container and the history. A CHECK on care_log enforces it.
 CREATE TYPE care_action AS ENUM (
     'watering', 'fertilizing', 'repotting', 'pruning', 'treatment', 'cleaning'
 );
@@ -27,10 +27,15 @@ CREATE TYPE health_status AS ENUM (
     'healthy', 'dormant', 'stressed', 'sick', 'recovering', 'dying'
 );
 
-CREATE TYPE equipment_type AS ENUM (
-    'pot', 'cachepot', 'saucer', 'stake', 'grow_light',
-    'humidifier', 'substrate', 'fertilizer', 'tool', 'other'
-);
+-- Three tables, three life cycles: a container is kept, a consumable is used
+-- up, a tool belongs to no plant in particular. Only a container attaches to a
+-- plant, and the composite foreign key on plant_container is what enforces it.
+CREATE TYPE container_type  AS ENUM ('pot', 'cachepot');
+CREATE TYPE consumable_type AS ENUM ('substrate', 'fertilizer');
+
+-- Carried by the row, not derived from finished_at IS NULL: a run that never
+-- reported back and a run someone stopped are not the same thing.
+CREATE TYPE batch_status AS ENUM ('running', 'ok', 'failed', 'aborted');
 
 
 -- ============================================================
@@ -83,6 +88,12 @@ CREATE TABLE species (
     temp_min_c             integer NOT NULL,
     temp_max_c             integer NOT NULL,
 
+    -- Physiological threshold, not an evaporation parameter. Below it the plant
+    -- browns at the leaf margins; that says nothing about how fast the substrate
+    -- dries, which is why this drives an alert and never the watering interval.
+    -- The species' own sensitivity already lives in species_watering.
+    humidity_min_pct       integer,
+
     fertilizing_interval_days integer,
     fertilizing_month_start   integer,
     fertilizing_month_end     integer,
@@ -96,6 +107,7 @@ CREATE TABLE species (
     CHECK (watering_ml_per_litre > 0),
     CHECK (exposure_max >= exposure_min),
     CHECK (temp_max_c > temp_min_c),
+    CHECK (humidity_min_pct IS NULL OR humidity_min_pct BETWEEN 0 AND 100),
     CHECK (fertilizing_interval_days IS NULL OR fertilizing_interval_days > 0),
     CHECK (repotting_interval_months IS NULL OR repotting_interval_months > 0),
     CHECK (fertilizing_month_start IS NULL OR fertilizing_month_start BETWEEN 1 AND 12),
@@ -189,18 +201,20 @@ CREATE TABLE plant_placement (
     room_version_id bigint NOT NULL REFERENCES room_version (id),
     x               numeric(10,2) NOT NULL,
     y               numeric(10,2) NOT NULL,
-    -- Height above the floor in centimetres. NULL means the plant sits on the ground.
-    height_cm       numeric(6,1),
+    -- How high the support stands, in centimetres — a shelf, a stool, a
+    -- windowsill. Not the height of the plant. NULL means it sits on the floor.
+    elevation_cm    numeric(6,1),
     created_at      timestamptz NOT NULL DEFAULT now(),
     closed_at       timestamptz,
-    CHECK (height_cm IS NULL OR height_cm >= 0)
+    CHECK (elevation_cm IS NULL OR elevation_cm >= 0)
 );
 
--- Everything bought for the plants: pots, cachepots, lamps, substrate, tools.
--- volume_l is the substrate volume a pot holds — the litres watering_ml_per_litre multiplies.
-CREATE TABLE equipment (
+-- What holds a plant: its pot, its cachepot. Kept, cleaned, reused — never
+-- consumed. volume_l is the substrate volume a pot holds, the litres
+-- watering_ml_per_litre multiplies.
+CREATE TABLE container (
     id           bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    type         equipment_type NOT NULL,
+    type         container_type NOT NULL,
     name         text NOT NULL,
     volume_l     numeric(6,2),
     material_id  bigint REFERENCES material (id),
@@ -215,8 +229,8 @@ CREATE TABLE equipment (
     -- Named after what it is, not after when it was acquired.
     is_nursery_pot boolean NOT NULL DEFAULT false,
 
-    -- Meaningful for containers only: a cachepot without a hole keeps water
-    -- at the roots, which lengthens the interval instead of shortening it.
+    -- A cachepot without a hole keeps water at the roots, which lengthens
+    -- the interval instead of shortening it.
     has_drainage boolean,
 
     purchased_on date,
@@ -226,7 +240,7 @@ CREATE TABLE equipment (
     closed_at    timestamptz,
     CHECK (volume_l IS NULL OR volume_l > 0),
     CHECK (price_eur IS NULL OR price_eur >= 0),
-    CONSTRAINT equipment_dimensions_positive CHECK (
+    CONSTRAINT container_dimensions_positive CHECK (
         (outer_top_diameter_cm    IS NULL OR outer_top_diameter_cm    > 0) AND
         (outer_bottom_diameter_cm IS NULL OR outer_bottom_diameter_cm > 0) AND
         (outer_height_cm          IS NULL OR outer_height_cm          > 0)
@@ -238,37 +252,75 @@ CREATE TABLE equipment (
         OR (purchased_on IS NULL AND price_eur IS NULL AND retailer IS NULL)
     ),
     CONSTRAINT nursery_pot_is_a_pot CHECK (NOT is_nursery_pot OR type = 'pot'),
-    -- Candidate key for the composite foreign key in plant_equipment,
+    -- Candidate key for the composite foreign key in plant_container,
     -- which is what stops its denormalised type from drifting
     UNIQUE (id, type)
 );
 
--- What a plant is attached to, and since when: its pot, its cachepot, and
--- anything else that belongs to it alone. Changing one closes the row and
--- opens a new one, like every other period in this model.
+-- What gets used up: substrate, fertiliser. A bag is bought once and depletes,
+-- so it belongs to no plant — attaching it to one would be meaningless, and
+-- the split is what makes that impossible rather than merely discouraged.
+CREATE TABLE consumable (
+    id           bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    type         consumable_type NOT NULL,
+    name         text NOT NULL,
+    volume_l     numeric(6,2),
+
+    -- Fertiliser only: the label figures, kept as written on the bottle
+    npk               text,
+    dilution_ml_per_l numeric(6,2),
+
+    purchased_on date,
+    price_eur    numeric(8,2),
+    retailer     text,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    closed_at    timestamptz,
+    CHECK (volume_l IS NULL OR volume_l > 0),
+    CHECK (price_eur IS NULL OR price_eur >= 0),
+    CHECK (dilution_ml_per_l IS NULL OR dilution_ml_per_l > 0),
+    CONSTRAINT npk_belongs_to_fertilizer CHECK (
+        type = 'fertilizer' OR (npk IS NULL AND dilution_ml_per_l IS NULL)
+    )
+);
+
+-- Everything else bought for the plants: secateurs, watering can, moisture
+-- meter. No type column — a tool is a tool, and nothing reads this table.
+CREATE TABLE tool (
+    id           bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    name         text NOT NULL,
+    purchased_on date,
+    price_eur    numeric(8,2),
+    retailer     text,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    closed_at    timestamptz,
+    CHECK (price_eur IS NULL OR price_eur >= 0)
+);
+
+-- Which container a plant sits in, and for which period. Changing one closes
+-- the row and opens a new one, like every other period in this model.
 --
--- equipment_type is denormalised on purpose. It cannot drift from
--- equipment.type — the composite foreign key forbids it — and it is what
+-- container_type is denormalised on purpose. It cannot drift from
+-- container.type — the composite foreign key forbids it — and it is what
 -- makes "one open pot AND one open cachepot per plant" expressible as an
--- index. No CHECK restricts which types may be attached: the interface
--- offers the sensible ones.
-CREATE TABLE plant_equipment (
+-- index.
+CREATE TABLE plant_container (
     id             bigint NOT NULL GENERATED ALWAYS AS IDENTITY,
     plant_id       bigint NOT NULL REFERENCES plant (id),
-    equipment_id   bigint NOT NULL REFERENCES equipment (id),
-    equipment_type equipment_type NOT NULL,
+    container_id   bigint NOT NULL REFERENCES container (id),
+    container_type container_type NOT NULL,
 
-    -- Real-world dates. created_at / closed_at say when the row was entered,
-    -- which is a different thing: a period lived in 2021 can be recorded today.
-    attached_on    date,
-    detached_on    date,
+    -- Real-world validity. created_at / closed_at say when the row was
+    -- entered, which is a different thing: a period lived in 2021 can be
+    -- recorded today.
+    valid_from     date,
+    valid_to       date,
 
     created_at     timestamptz NOT NULL DEFAULT now(),
     closed_at      timestamptz,
 
     PRIMARY KEY (id),
-    FOREIGN KEY (equipment_id, equipment_type) REFERENCES equipment (id, type),
-    CHECK (detached_on IS NULL OR attached_on IS NULL OR detached_on >= attached_on)
+    FOREIGN KEY (container_id, container_type) REFERENCES container (id, type),
+    CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
 );
 
 -- One row per batch execution. Answers "did it run, and did anything fail",
@@ -280,6 +332,7 @@ CREATE TABLE plant_equipment (
 -- a row for last night is itself the signal.
 CREATE TABLE batch_run (
     id            bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    status        batch_status NOT NULL DEFAULT 'running',
     started_at    timestamptz NOT NULL DEFAULT now(),
     finished_at   timestamptz,
     sites_ok      integer NOT NULL DEFAULT 0,
@@ -311,20 +364,25 @@ CREATE TABLE weather_log (
 );
 
 -- Care actually carried out. Single source of truth.
--- done_at is when it happened, recorded_at when it was entered — the same
--- split as potting.potted_on against created_at.
+-- done_at is the day it happened, recorded_at the instant it was entered —
+-- the same split as plant_container.valid_from against created_at.
 -- Mistakes are corrected in place: one writer, no audit trail needed.
+--
+-- A date, not a timestamp: nothing in the engine ever reads an hour off this
+-- column, and a watering entered at 23:00 would otherwise land on the next
+-- day in UTC. The ordering against recorded_at is left to the application —
+-- comparing a date to a timestamptz needs a timezone conversion, which is not
+-- immutable and therefore not allowed in a CHECK.
 CREATE TABLE care_log (
     id          bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     plant_id    bigint NOT NULL REFERENCES plant (id),
     action      care_action NOT NULL,
-    done_at     timestamptz NOT NULL DEFAULT now(),
+    done_at     date NOT NULL DEFAULT CURRENT_DATE,
     recorded_at timestamptz NOT NULL DEFAULT now(),
     volume_ml   integer,
     notes       text,
     CHECK (volume_ml IS NULL OR volume_ml > 0),
-    CHECK (recorded_at >= done_at),
-    -- Repotting is recorded in potting, never here
+    -- Repotting is recorded in plant_container, never here
     CONSTRAINT care_log_excludes_repotting CHECK (action <> 'repotting')
 );
 
@@ -388,7 +446,7 @@ CREATE TABLE notification_log (
 --   reminder.care_log_id points at a care_log of the same plant and action,
 --   reminder.due_on and notification_log.sent_on are computed in the site's
 --     timezone, never in UTC, like weather_log.observed_on,
---   plant_equipment holds only kinds that belong to a single plant,
+--   care_log.recorded_at falls on or after care_log.done_at,
 
 
 -- ============================================================
@@ -409,15 +467,15 @@ CREATE INDEX ix_room_version_room       ON room_version (room_id);
 CREATE INDEX ix_wall_element_room       ON wall_element (room_version_id);
 CREATE INDEX ix_plant_placement_version ON plant_placement (room_version_id);
 
--- One open item of each kind per plant — a pot and a cachepot may coexist,
--- two pots may not — and one plant per physical object.
-CREATE UNIQUE INDEX ux_plant_equipment_current
-    ON plant_equipment (plant_id, equipment_type) WHERE closed_at IS NULL;
-CREATE UNIQUE INDEX ux_plant_equipment_item
-    ON plant_equipment (equipment_id) WHERE closed_at IS NULL;
+-- One open container of each kind per plant — a pot and a cachepot may
+-- coexist, two pots may not — and one plant per physical container.
+CREATE UNIQUE INDEX ux_plant_container_current
+    ON plant_container (plant_id, container_type) WHERE closed_at IS NULL;
+CREATE UNIQUE INDEX ux_plant_container_item
+    ON plant_container (container_id) WHERE closed_at IS NULL;
 
-CREATE INDEX ix_equipment_material      ON equipment (material_id);
-CREATE INDEX ix_plant_equipment_plant   ON plant_equipment (plant_id);
+CREATE INDEX ix_container_material      ON container (material_id);
+CREATE INDEX ix_plant_container_plant   ON plant_container (plant_id);
 CREATE INDEX ix_weather_log_site_date   ON weather_log (site_id, observed_on DESC);
 CREATE INDEX ix_care_log_plant_action   ON care_log (plant_id, action, done_at DESC);
 CREATE INDEX ix_plant_health_plant      ON plant_health (plant_id, noted_on DESC, id DESC);

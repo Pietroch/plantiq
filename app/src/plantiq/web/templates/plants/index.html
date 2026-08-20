@@ -24,7 +24,7 @@
     <td>{{ plant.site_name }}</td>
     <td>{{ plant.room_name }}</td>
     <td>{{ "%.0f" | format(plant.x) }}, {{ "%.0f" | format(plant.y) }}</td>
-    <td>{{ (plant.height_cm | int ~ " cm") if plant.height_cm is not none else "sol" }}</td>
+    <td>{{ (plant.elevation_cm | int ~ " cm") if plant.elevation_cm is not none else "sol" }}</td>
     <td>
       {%- if plant.pot_name -%}
         {{ plant.pot_name }}{% if plant.pot_volume_l %} ({{ plant.pot_volume_l | float | round(1) }} L){% endif %}

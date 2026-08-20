@@ -4,9 +4,13 @@ name: Daily run
 
 on:
   schedule:
-    # 16:00 UTC — 18h Belgian summer time, 17h in winter. GitHub cron has no
+    # 12:00 UTC — 14h Belgian summer time, 13h in winter. GitHub cron has no
     # daylight saving, so the local hour shifts by one across the year.
-    - cron: "0 16 * * *"
+    #
+    # Early afternoon on purpose: an evening reading catches the daily minimum
+    # temperature and maximum humidity, which understates the evaporative
+    # demand the plant actually lived through.
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 jobs:

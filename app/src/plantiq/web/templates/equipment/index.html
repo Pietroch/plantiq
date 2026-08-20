@@ -7,37 +7,48 @@
 {% block content %}
 <h1>Équipement</h1>
 
+<p>Trois cycles de vie distincts : un contenant se garde, un consommable s'épuise,
+   un outil n'appartient à aucune plante. Seul un contenant s'attache à une plante.</p>
+
 {% if error %}
 <p><strong>Refusé : {{ error }}</strong></p>
 {% endif %}
 
-{% if equipment %}
+{% for table, spec in tables.items() %}
+<h2>{{ spec.label }}</h2>
+
+{% if rows[table] %}
 <table border="1">
   <tr>
-    <th>id</th><th>type</th><th>nom</th><th>volume</th><th>dimensions</th><th>matière</th>
-    <th>occupé par</th><th>acheté le</th><th>prix</th><th>vendeur</th><th>actions</th>
+    <th>id</th>
+    {# Business labels, from views/equipment.py — never the SQL column name #}
+    {% for field, kind in spec.fields.items() if kind != "material" %}
+    <th>{{ labels[table][field] }}{% if units.get(field) %} ({{ units[field] }}){% endif %}</th>
+    {% endfor %}
+    {% if table == "container" %}<th>Matière</th><th>Occupé par</th>{% endif %}
+    <th>Actions</th>
   </tr>
-  {% for item in equipment %}
+  {% for item in rows[table] %}
   <tr>
     <td>{{ item.id }}</td>
-    <td>{{ types[item.type] }}</td>
-    <td>{{ item.name }}{% if item.is_nursery_pot %} <em>(pot de culture)</em>{% endif %}</td>
-    <td>{{ (item.volume_l | float | round(1) ~ " L") if item.volume_l else "" }}</td>
+    {% for field, kind in spec.fields.items() if kind != "material" %}
     <td>
-      {%- if item.outer_top_diameter_cm or item.outer_height_cm -%}
-        ⌀{{ item.outer_top_diameter_cm | float | round(1) if item.outer_top_diameter_cm else "?" }}
-        {%- if item.outer_bottom_diameter_cm %}→{{ item.outer_bottom_diameter_cm | float | round(1) }}{% endif %}
-        × h{{ item.outer_height_cm | float | round(1) if item.outer_height_cm else "?" }} cm
-      {%- else -%}—{%- endif -%}
+      {%- if kind == "choice" -%}{{ types[item[field]] }}
+      {%- elif kind == "tri" -%}
+        {%- if item[field] is none -%}—{%- elif item[field] -%}percé{%- else -%}sans trou{%- endif -%}
+      {%- elif kind == "bool" -%}{{ "oui" if item[field] else "" }}
+      {%- elif field == "purchased_on" -%}{{ item[field].strftime("%d/%m/%Y") if item[field] else "" }}
+      {%- elif kind == "float" and item[field] is not none -%}{{ item[field] | float | round(2) }}
+      {%- else -%}{{ item[field] if item[field] is not none else "" }}{%- endif -%}
     </td>
+    {% endfor %}
+    {% if table == "container" %}
     <td>{{ item.material_label or "" }}</td>
     <td>{{ item.plant_name or "—" }}</td>
-    <td>{{ item.purchased_on.strftime("%d/%m/%Y") if item.purchased_on else "" }}</td>
-    <td>{{ (item.price_eur | float | round(2) ~ " €") if item.price_eur is not none else "" }}</td>
-    <td>{{ item.retailer or "" }}</td>
+    {% endif %}
     <td>
-      <a href="{{ url_for('equipment.edit', equipment_id=item.id) }}">Modifier</a>
-      <form method="post" action="{{ url_for('equipment.close', equipment_id=item.id) }}">
+      <a href="{{ url_for('equipment.edit', table=table, item_id=item.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('equipment.close', table=table, item_id=item.id) }}">
         <button type="submit">Clôturer</button>
       </form>
     </td>
@@ -45,12 +56,15 @@
   {% endfor %}
 </table>
 {% else %}
-<p>Aucun équipement.</p>
+<p>Aucun élément.</p>
 {% endif %}
 
-<h2>Ajouter un équipement</h2>
+<h3>Ajouter</h3>
 
-{% with item = None, action = url_for("equipment.create"), submit_label = "Ajouter" %}
+{% with item = None, action = url_for("equipment.create", table=table),
+        submit_label = "Ajouter" %}
   {% include "equipment/_form.html" %}
 {% endwith %}
+
+{% endfor %}
 {% endblock %}

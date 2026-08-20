@@ -2,7 +2,6 @@
 
 import json
 from datetime import date
-from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
 
@@ -21,6 +20,10 @@ RESEND = {
     "fertilizing": {"delay_days": 7, "max_resends": 2},
     "repotting": {"delay_days": 7, "max_resends": 2},
 }
+
+# A real run takes seconds. Past this, a row still 'running' is a run that died
+# without reporting back, and the next run says so instead of leaving it open.
+STALE_RUN_MINUTES = 15
 
 
 def _open_plants() -> list[int]:
@@ -76,7 +79,7 @@ def send_decision(plant_id: int, action: str, ctx) -> tuple[bool, str]:
     candidates = [("dernier envoi", history["last_sent"])]
     done = ctx.last_care.get(action)
     if done:
-        candidates.append(("dernier soin", done.astimezone(ZoneInfo(ctx.timezone)).date()))
+        candidates.append(("dernier soin", done))
     label, reference = max(
         ((name, day) for name, day in candidates if day), key=lambda pair: pair[1]
     )
@@ -88,7 +91,23 @@ def send_decision(plant_id: int, action: str, ctx) -> tuple[bool, str]:
     return False, f"renvoi dans {remaining} jour(s), {label} le {reference:%d/%m/%Y}"
 
 
+def _close_stale_runs() -> None:
+    """Marks as aborted any run still 'running' well past its plausible length.
+
+    There is no watchdog: the daily batch is the only thing that ever runs, so
+    the sweep happens at the start of the next one. A row left 'running' means
+    the process died before it could report back.
+    """
+    query(
+        "UPDATE batch_run SET status = 'aborted', finished_at = now() "
+        "WHERE status = 'running' AND started_at < now() - make_interval(mins => %s)",
+        (STALE_RUN_MINUTES,),
+    )
+
+
 def run() -> None:
+    _close_stale_runs()
+
     with connect() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("INSERT INTO batch_run DEFAULT VALUES RETURNING id, started_at")
@@ -134,7 +153,7 @@ def run() -> None:
                         reminder["id"],
                         batch["id"],
                         ctx.today,
-                        json.dumps(ctx.payload()),
+                        json.dumps(ctx.payload(reminder["action"])),
                     ),
                 )
                 counters["sent"] += 1
@@ -146,10 +165,23 @@ def run() -> None:
         failure = str(error)
         log.exception("Batch interrompu")
 
+    # The status is written, not derived: 'running' stays only on a run that
+    # never reported back, which is the signal that it died mid-flight.
+    # A run that wrote no reading at all is not a success either — no open
+    # site, or every site failing, both leave the engine without weather.
+    status = (
+        "failed"
+        if failure
+        or counters["send_failed"]
+        or counters["sites_failed"]
+        or not counters["sites_ok"]
+        else "ok"
+    )
     assignments = ", ".join(f"{name} = %s" for name in counters)
     query(
-        f"UPDATE batch_run SET finished_at = now(), {assignments}, error = %s WHERE id = %s",
-        tuple(counters.values()) + (failure, batch["id"]),
+        f"UPDATE batch_run SET finished_at = now(), status = %s, {assignments}, "
+        "error = %s WHERE id = %s",
+        (status,) + tuple(counters.values()) + (failure, batch["id"]),
     )
     log.info(
         "Batch %s terminé : %s site(s), %s rappel(s), %s envoi(s), %s échec(s)",
@@ -181,9 +213,13 @@ def preview() -> None:
         # and the batch must agree on which day it is
         print(f"=== {ctx.plant_name} — {ctx.species_name}   ({ctx.today:%d/%m/%Y})")
 
-        # A placement problem, not a task: shown once per plant, above the actions
+        # Conditions, not tasks: shown once per plant, above the actions
         if ctx.exposure_alert:
             print(f"  {'lumière':14} {ctx.exposure_alert}")
+        if ctx.humidity_alert:
+            print(f"  {'humidité':14} {ctx.humidity_alert}")
+        for alert in ctx.placement_alerts:
+            print(f"  {'placement':14} {alert}")
 
         for verdict in assess_all(ctx):
             label = LABELS[verdict.action]

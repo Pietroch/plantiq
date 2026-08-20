@@ -17,7 +17,7 @@
 <table border="1">
   <tr>
     <th>id</th><th>nom scientifique</th><th>nom commun</th>
-    <th>ml / litre</th><th>exposition</th><th>soleil</th><th>températures</th>
+    <th>ml / litre</th><th>exposition</th><th>soleil</th><th>températures</th><th>humidité min</th>
     <th>arrosage (jours)</th><th>fertilisation</th><th>rempotage</th><th>actions</th>
   </tr>
   {% for item in species %}
@@ -29,6 +29,7 @@
     <td>{{ exposures[item.exposure_min] }} → {{ exposures[item.exposure_max] }}</td>
     <td>{{ sun_tolerances[item.sun_tolerance] }}</td>
     <td>{{ item.temp_min_c }} à {{ item.temp_max_c }} °C</td>
+    <td>{{ (item.humidity_min_pct ~ " %") if item.humidity_min_pct is not none else "—" }}</td>
     <td>
       {% for key, label in seasons.items() %}
         {{ label }} {{ intervals.get(item.id, {}).get(key, "—") }}{{ "" if loop.last else " · " }}

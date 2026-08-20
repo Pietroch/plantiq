@@ -65,7 +65,7 @@
   <tr><th>Pièce</th><td>{{ current_placement.room_name }}{% if current_placement.floor is not none %} (étage {{ current_placement.floor }}){% endif %}</td></tr>
   <tr><th>Milieu</th><td>{{ "Intérieur" if current_placement.environment == "indoor" else "Extérieur" }}</td></tr>
   <tr><th>Coordonnées</th><td>{{ current_placement.x | float | round(0) | int }}, {{ current_placement.y | float | round(0) | int }}</td></tr>
-  <tr><th>Hauteur</th><td>{{ (current_placement.height_cm | int ~ " cm depuis le sol") if current_placement.height_cm is not none else "au sol" }}</td></tr>
+  <tr><th>Hauteur du support</th><td>{{ (current_placement.elevation_cm | int ~ " cm") if current_placement.elevation_cm is not none else "au sol" }}</td></tr>
   <tr><th>Depuis le</th><td>{{ date(current_placement.created_at) }}</td></tr>
 </table>
 
@@ -92,7 +92,7 @@ Plan.draw(document.getElementById("plan"), {
 
 {% if current_potting %}
 <table border="1">
-  <tr><th>Pot</th><td>{{ current_potting.equipment_name }}{% if current_potting.is_nursery_pot %} <em>(pot de culture)</em>{% endif %}</td></tr>
+  <tr><th>Pot</th><td>{{ current_potting.container_name }}{% if current_potting.is_nursery_pot %} <em>(pot de culture)</em>{% endif %}</td></tr>
   <tr><th>Volume de substrat</th><td>{{ (current_potting.volume_l | float | round(1) ~ " L") if current_potting.volume_l else "—" }}</td></tr>
   <tr><th>Dimensions</th>
     <td>
@@ -112,19 +112,19 @@ Plan.draw(document.getElementById("plan"), {
   <tr><th>Cache-pot</th>
     <td>
       {%- if current_cachepot -%}
-        {{ current_cachepot.equipment_name }}
+        {{ current_cachepot.container_name }}
         {%- if current_cachepot.has_drainage is not none %} ·
           {{ "percé" if current_cachepot.has_drainage else "sans trou" }}{% endif %}
       {%- else -%}aucun{%- endif -%}
     </td></tr>
-  <tr><th>Rempotée le</th><td>{{ date(current_potting.attached_on) }}</td></tr>
+  <tr><th>Rempotée le</th><td>{{ date(current_potting.valid_from) }}</td></tr>
   <tr><th>Achat du pot</th>
     <td>
       {%- if current_potting.is_nursery_pot -%}
         arrivé avec la plante, son coût est dans le prix de la plante
       {%- else -%}
-        {{ date(current_potting.equipment_purchased_on) }} · {{ money(current_potting.equipment_price_eur) }}
-        {%- if current_potting.equipment_retailer %} · {{ current_potting.equipment_retailer }}{% endif %}
+        {{ date(current_potting.container_purchased_on) }} · {{ money(current_potting.container_price_eur) }}
+        {%- if current_potting.container_retailer %} · {{ current_potting.container_retailer }}{% endif %}
       {%- endif -%}
     </td></tr>
 </table>
@@ -284,18 +284,18 @@ Plan.draw(document.getElementById("plan"), {
   {% for item in pottings %}
   <tr>
     <td>
-      {%- if item.attached_on and item.detached_on -%}
-        du {{ date(item.attached_on) }} au {{ date(item.detached_on) }}
-      {%- elif item.attached_on -%}
-        depuis le {{ date(item.attached_on) }}
-      {%- elif item.detached_on -%}
-        jusqu'au {{ date(item.detached_on) }}
+      {%- if item.valid_from and item.valid_to -%}
+        du {{ date(item.valid_from) }} au {{ date(item.valid_to) }}
+      {%- elif item.valid_from -%}
+        depuis le {{ date(item.valid_from) }}
+      {%- elif item.valid_to -%}
+        jusqu'au {{ date(item.valid_to) }}
       {%- else -%}
         date inconnue
       {%- endif -%}
     </td>
-    <td>{{ labels[item.equipment_type] }}</td>
-    <td>{{ item.equipment_name }}{% if item.is_nursery_pot %} <em>(culture)</em>{% endif %}</td>
+    <td>{{ labels[item.container_type] }}</td>
+    <td>{{ item.container_name }}{% if item.is_nursery_pot %} <em>(culture)</em>{% endif %}</td>
     <td>{{ (item.volume_l | float | round(1) ~ " L") if item.volume_l else "—" }}</td>
     <td>{{ item.material_label or "—" }}</td>
     <td>{{ "en cours" if item.closed_at is none else "close" }}</td>
@@ -314,7 +314,7 @@ Plan.draw(document.getElementById("plan"), {
     <td>{{ item.site_name }}</td>
     <td>{{ item.room_name }}</td>
     <td>{{ item.x | float | round(0) | int }}, {{ item.y | float | round(0) | int }}</td>
-    <td>{{ (item.height_cm | int ~ " cm") if item.height_cm is not none else "sol" }}</td>
+    <td>{{ (item.elevation_cm | int ~ " cm") if item.elevation_cm is not none else "sol" }}</td>
     <td>{{ date(item.created_at) }}</td>
     <td>{{ "en cours" if item.closed_at is none else "close" }}</td>
   </tr>

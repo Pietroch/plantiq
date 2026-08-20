@@ -22,8 +22,10 @@ TABLE_ORDER = [
     "room_version",
     "room_vertex",
     "wall_element",
-    "equipment",
-    "plant_equipment",
+    "container",
+    "consumable",
+    "tool",
+    "plant_container",
     "plant_placement",
     # Before the three journals that carry batch_run_id, and so purged after them
     "batch_run",

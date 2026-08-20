@@ -71,3 +71,18 @@ def test_width_can_change_the_level_on_its_own():
     close = (1000 - 100, 200)
     assert exposure(close, ROOM, WINDOW, 0, UNITS_PER_CM).level == "bright_indirect"
     assert exposure(close, ROOM, narrow, 0, UNITS_PER_CM).level == "low"
+
+
+# --- north_angle convention
+
+
+def test_the_north_angle_convention_holds():
+    """Real geometry of the Séjour: five vertices, north at 276 degrees.
+
+    north_angle turns clockwise from the top of the drawing to true north, so
+    the window on wall 0 — the top wall — faces east. Pinned here because
+    nothing in the database records the convention.
+    """
+    room = [(260, 60), (400, 60), (400, 380), (300, 400), (200, 100)]
+    assert wall_azimuth(room, 0, 276) == pytest.approx(84.0, abs=0.5)
+    assert cardinal_of(wall_azimuth(room, 0, 276)) == "E"

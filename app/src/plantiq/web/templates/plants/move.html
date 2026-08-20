@@ -10,9 +10,9 @@
 <p><a href="{{ url_for('plants.index') }}">Retour à la liste</a></p>
 
 <p>
-  <label>Hauteur depuis le sol
-    <input type="number" id="height_cm" min="0" step="1" style="width:6em"
-           value="{{ placement.height_cm | int if placement.height_cm is not none else '' }}"
+  <label>Hauteur du support
+    <input type="number" id="elevation_cm" min="0" step="1" style="width:6em"
+           value="{{ placement.elevation_cm | int if placement.elevation_cm is not none else '' }}"
            placeholder="vide = sol"> cm
   </label>
 </p>
@@ -111,7 +111,7 @@ async function save(reason) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       reason,
-      height_cm: document.getElementById("height_cm").value,
+      elevation_cm: document.getElementById("elevation_cm").value,
       x: marker.x,
       y: marker.y,
     }),
